@@ -254,7 +254,7 @@ function iniciarFiltros() {
       <div id="f-zm"></div>
     </div>
     <p class="filtros-nota" id="f-nota" hidden>Capacity deja fuera la fase Inicial cuando el inmueble no fue priceado.</p>
-    <p class="filtros-ayuda">Semana, mes, trimestre y año cambian el eje de las dos gráficas. La semana abre el lunes. La tabla sigue siendo nid por nid. Sin fase marcada entran Inicial y Comité.</p>`;
+    <p class="filtros-ayuda">Semana, mes, trimestre y año cambian el eje de las dos gráficas. En semana el eje marca el mes y el número sale al pasar el cursor. La semana abre el lunes. Sin fase marcada entran Inicial y Comité.</p>`;
   const selPais = document.getElementById("f-pais");
   selPais.innerHTML = `<option value="">Todos</option>`
     + c.pais.map((p, i) => `<option value="${i}">${escapeFiltro(rotuloFiltro(p))}</option>`).join("");

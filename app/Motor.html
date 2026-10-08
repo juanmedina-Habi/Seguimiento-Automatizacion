@@ -473,7 +473,8 @@ function grafica(g, etiquetador, unaSola) {
     }).join("");
     capa = `<svg class="capa" viewBox="0 0 100 100" preserveAspectRatio="none">${trazos}</svg>`;
 
-    capa += lineas.map(se => se.valores.map((v, i) => v == null ? "" :
+    const semana = typeof estadoFiltro !== "undefined" && estadoFiltro.grano === "semana";
+    if (!semana) capa += lineas.map(se => se.valores.map((v, i) => v == null ? "" :
       `<span class="punto" style="left:${x(i)}%;bottom:${100 - y(v)}%;background:${se.color}"></span>`
     ).join("")).join("");
 
@@ -746,7 +747,8 @@ function grafica(g, etiquetador, unaSola) {
     }
   }
 
-  const ejeX = (g.categorias || []).map(c =>
+  const semanaEje = typeof estadoFiltro !== "undefined" && estadoFiltro.grano === "semana";
+  const ejeX = semanaEje ? ejePorMes(g.categorias) : (g.categorias || []).map(c =>
     `<div class="etiqueta"><span>${c[0] ?? ""}</span><span>${c[1] ?? ""}</span></div>`).join("");
 
   // Las etiquetas de la línea sobresalen del lienzo por arriba. Sin este aire
@@ -765,7 +767,7 @@ function grafica(g, etiquetador, unaSola) {
     };
     return `<button type="button" class="mes-hit" data-punto="${escapeFiltro(JSON.stringify(punto))}" aria-label="${escapeFiltro(punto.mes)}"></button>`;
   }).join("");
-  return `<div class="grafica">
+  return `<div class="grafica${semanaEje ? " grafica-semana" : ""}">
     <div class="plot" style="height:${alto}pt;margin-top:${aire}pt;padding-left:${padIzq}pt;padding-right:${padDer}pt">
       <div class="eje izq" aria-hidden="true">${tickHtml(izq, cien ? "decimal_1" : (barras.length ? formatoBarras : formatoLineas))}</div>
       ${rotularDer ? `<div class="eje der" aria-hidden="true">${tickHtml(der, formatoLineas)}</div>` : ""}
@@ -774,6 +776,24 @@ function grafica(g, etiquetador, unaSola) {
     <div class="eje-x" style="padding-left:${padIzq}pt;padding-right:${padDer}pt">${ejeX}</div>
     <div class="mes-hits" style="left:${padIzq}pt;right:${padDer}pt">${hits}</div>
   </div>`;
+}
+
+function ejePorMes(categorias) {
+  const meses = (categorias || []).map(c => String(c?.[2] || "").slice(0, 7));
+  const marca = new Array(meses.length).fill(false);
+  let i = 0;
+  while (i < meses.length) {
+    let j = i;
+    while (j < meses.length && meses[j] === meses[i]) j++;
+    marca[i + Math.floor((j - i) / 2)] = true;
+    i = j;
+  }
+  return (categorias || []).map((c, k) => {
+    if (!marca[k]) return `<div class="etiqueta"><span></span><span></span></div>`;
+    const partes = String(c?.[2] || "").split("-");
+    const rotulo = MES[+partes[1] - 1] || "";
+    return `<div class="etiqueta"><span>${rotulo}</span><span>${partes[0] || ""}</span></div>`;
+  }).join("");
 }
 
 function mesLargo(cat) {
@@ -876,10 +896,10 @@ function indicadorHtml(ind, corte) {
      aire para los rótulos. Es la salida cuando un indicador con barras agrupadas
      Y línea encima satura el panel aunque las etiquetas ya estén en 6 pt.
      La ventana sigue anclada al CORTE: se recortan los meses más VIEJOS. */
-  const topePeriodos = (typeof estadoFiltro !== "undefined" && estadoFiltro.grano === "semana")
-    ? 200
-    : (ind.mesesPanel || 13);
+  const esSemana = typeof estadoFiltro !== "undefined" && estadoFiltro.grano === "semana";
+  const topePeriodos = esSemana ? 200 : (ind.mesesPanel || 13);
   const men = recortar(ind.mensual, corte, topePeriodos, "mensual");
+  if (esSemana && men) men.etiquetas = false;
   const hayGrafica = (sem?.series?.length || men?.series?.length);
 
   const hayCohorte = ind.cohorteSemanal || ind.cohorteMensual;
