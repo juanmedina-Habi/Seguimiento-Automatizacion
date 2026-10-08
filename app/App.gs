@@ -6,15 +6,17 @@
 var PROYECTO = 'papyrus-delivery-data';
 var TABLA = '`papyrus-delivery-data.idm_squad_precios.tabla_automatizacion_polinator`';
 var TOPE_CSV = 25000;
+var SCRIPT_DEV = '1JNJGOc2SKNnttOvfYJoz63_0r4HlZAXkqpGKWFcIUzNjeth8qxwygbXE';
 
 function doGet() {
   if (!usuarioPermitido_()) {
     return HtmlService.createHtmlOutput('<!DOCTYPE html><html lang="es"><body><p>Sin acceso</p></body></html>')
       .setTitle('Sin acceso');
   }
-  return HtmlService.createTemplateFromFile('index')
-    .evaluate()
-    .setTitle('Seguimiento Automatización')
+  var plantilla = HtmlService.createTemplateFromFile('index');
+  plantilla.esDev = ScriptApp.getScriptId() === SCRIPT_DEV;
+  return plantilla.evaluate()
+    .setTitle(plantilla.esDev ? 'Seguimiento Automatización (dev)' : 'Seguimiento Automatización')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 

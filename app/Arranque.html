@@ -1,5 +1,10 @@
 <script>
 /* Abre el tablero y vuelve a pintar cuando cambia un filtro. */
+if (window.ES_DEV) {
+  const marcaDev = document.getElementById("marca-dev");
+  if (marcaDev) marcaDev.hidden = false;
+  document.title = "Seguimiento Automatización (dev)";
+}
 /* ------------------------------------------------------------------ render */
 // Sin datos.js (o abriendo la plantilla sola) se pintan los datos de demostración.
 const HAY_DATOS = !!(window.CELDAS || window.FILAS_WBR);
