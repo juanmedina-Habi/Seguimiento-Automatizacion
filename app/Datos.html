@@ -44,6 +44,7 @@ const KPIS_POR_OMISION = ["wow", "mtd_actual", "mtd_anterior", "mom"];
 function etiqueta(iso, periodicidad) {
   const [a, m, d] = iso.split("-");
   const grano = (typeof estadoFiltro !== "undefined" && estadoFiltro.grano) || "mes";
+  if (grano === "semana") return [`${+d} ${MES[+m - 1]}`, a, iso];
   if (grano === "trimestre") {
     const t = Math.floor((Number(m) - 1) / 3) + 1;
     return [`${a} T${t}`, "", iso];

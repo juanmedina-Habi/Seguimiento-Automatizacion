@@ -114,7 +114,7 @@ function detalleFiltro() {
 }
 
 function notasDeGrano() {
-  const palabra = { mes: "mes", trimestre: "trimestre", anio: "año" }[estadoFiltro.grano || "mes"];
+  const palabra = { semana: "semana", mes: "mes", trimestre: "trimestre", anio: "año" }[estadoFiltro.grano || "mes"];
   for (const s of REPORTE.secciones || []) {
     for (const ind of s.indicadores || []) {
       if (ind.nota) ind.nota = ind.nota.replace(/\b(mes|trimestre|año)\b/, palabra);
@@ -229,6 +229,7 @@ function iniciarFiltros() {
       <div class="tiempo">
         <span>Tiempo</span>
         <div class="fase-pills" id="f-tiempo">
+          <button type="button" data-grano="semana" aria-pressed="false">Semana</button>
           <button type="button" data-grano="mes" class="activa" aria-pressed="true">Mes</button>
           <button type="button" data-grano="trimestre" aria-pressed="false">Trimestre</button>
           <button type="button" data-grano="anio" aria-pressed="false">Año</button>
@@ -253,7 +254,7 @@ function iniciarFiltros() {
       <div id="f-zm"></div>
     </div>
     <p class="filtros-nota" id="f-nota" hidden>Capacity deja fuera la fase Inicial cuando el inmueble no fue priceado.</p>
-    <p class="filtros-ayuda">Mes, trimestre y año cambian el eje de las dos gráficas. La tabla sigue siendo nid por nid. Sin fase marcada entran Inicial y Comité.</p>`;
+    <p class="filtros-ayuda">Semana, mes, trimestre y año cambian el eje de las dos gráficas. La semana abre el lunes. La tabla sigue siendo nid por nid. Sin fase marcada entran Inicial y Comité.</p>`;
   const selPais = document.getElementById("f-pais");
   selPais.innerHTML = `<option value="">Todos</option>`
     + c.pais.map((p, i) => `<option value="${i}">${escapeFiltro(rotuloFiltro(p))}</option>`).join("");

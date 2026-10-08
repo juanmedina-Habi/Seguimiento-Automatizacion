@@ -876,7 +876,10 @@ function indicadorHtml(ind, corte) {
      aire para los rótulos. Es la salida cuando un indicador con barras agrupadas
      Y línea encima satura el panel aunque las etiquetas ya estén en 6 pt.
      La ventana sigue anclada al CORTE: se recortan los meses más VIEJOS. */
-  const men = recortar(ind.mensual, corte, ind.mesesPanel || 13, "mensual");
+  const topePeriodos = (typeof estadoFiltro !== "undefined" && estadoFiltro.grano === "semana")
+    ? 200
+    : (ind.mesesPanel || 13);
+  const men = recortar(ind.mensual, corte, topePeriodos, "mensual");
   const hayGrafica = (sem?.series?.length || men?.series?.length);
 
   const hayCohorte = ind.cohorteSemanal || ind.cohorteMensual;

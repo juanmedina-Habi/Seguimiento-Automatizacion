@@ -112,9 +112,18 @@ function prepararTablero(tabla) {
   window.CORTE_WBR = dias.length ? dias[dias.length - 1] : "";
   reconstruirCeldas();
 }
+function lunesDe(iso) {
+  const [a, m, d] = iso.split("-").map(Number);
+  const fecha = new Date(Date.UTC(a, m - 1, d));
+  fecha.setUTCDate(fecha.getUTCDate() - (fecha.getUTCDay() + 6) % 7);
+  const mes = String(fecha.getUTCMonth() + 1).padStart(2, "0");
+  const dia = String(fecha.getUTCDate()).padStart(2, "0");
+  return fecha.getUTCFullYear() + "-" + mes + "-" + dia;
+}
 function clavePeriodo(dia) {
   const grano = (typeof estadoFiltro !== "undefined" && estadoFiltro.grano) || "mes";
   const [a, m] = dia.split("-");
+  if (grano === "semana") return lunesDe(dia);
   if (grano === "anio") return a + "-01-01";
   if (grano === "trimestre") {
     const ini = String(Math.floor((Number(m) - 1) / 3) * 3 + 1).padStart(2, "0");
