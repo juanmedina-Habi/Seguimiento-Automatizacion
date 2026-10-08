@@ -1,0 +1,117 @@
+<script>
+/* Qué gráficas salen y con qué color. Es el archivo que se toca para cambiar un indicador. */
+/* ===========================================================================
+   CONFIGURACIÓN DEL ÁREA — lo único que se edita en este archivo
+   ---------------------------------------------------------------------------
+   Los NÚMEROS vienen de la consulta, vía datos.js. Acá solo se declara qué
+   indicadores salen, en qué orden y bajo qué banda, más lo editorial que
+   ninguna consulta puede saber: el comentario de la semana, el sello, las notas.
+
+   `nombre` tiene que coincidir EXACTO con la columna `indicador` del SQL.
+
+   Por indicador, todo opcional salvo el nombre:
+     tipo: 'barra' | 'linea'          color: 'var(--serie-1)' … 'var(--serie-6)'
+     formato: 'entero'|'miles'|'decimal'|'porcentaje'|'moneda'
+     kpis: [...]                      cuáles KPIs salen y en qué orden
+     agrupadas: true                  barras lado a lado en vez de apiladas
+     ejeDerecho: false                no rotular el eje de las líneas
+     series: { '<serie del SQL>': { nombre, color, tipo, formato } }
+     nota, sello, comentario, leyenda      (ver el contrato de arriba)
+
+   `series` solo hace falta cuando la consulta devuelve la columna `serie` con
+   más de un trazo por indicador; sin ella cada serie toma un color de la paleta
+   en orden y sale como barra.
+   ========================================================================= */
+
+const CONFIG = {
+  area: "Seguimiento Automatización",
+  pais: "Colombia y México",
+  secciones: [
+    {
+      banda: "Seguimiento Automatización", nivel: 1,
+      indicadores: [
+        {
+          nombre: "Nivel de automatización",
+          nota: "Conteo de nid por mes, partido por método de precio.",
+          formato: "entero",
+          kpis: [],
+          mesesPanel: 24,
+          etiquetas: true,
+          rotuladoDenso: true,
+          series: {
+            "Automático": { color: "var(--serie-2)", tipo: "barra" },
+            "Manual": { color: "var(--serie-1)", tipo: "barra" },
+          },
+        },
+        {
+          nombre: "Porcentaje de automatización",
+          nota: "Automático ÷ todos los nid del mes.",
+          formato: "porcentaje",
+          kpis: [],
+          mesesPanel: 24,
+          etiquetas: true,
+          rotulosLinea: "todos",
+          guias: true,
+          series: {
+            "% de automatización": { tipo: "linea", color: "var(--serie-linea)", formato: "porcentaje" },
+          },
+        },
+      ],
+    },
+    {
+      banda: "Seguimiento Polynator", nivel: 1,
+      indicadores: [
+        {
+          nombre: "Precios usando Polynator",
+          nota: "Conteo de nid por mes, partido por uso de Polynator.",
+          formato: "entero",
+          kpis: [],
+          mesesPanel: 24,
+          etiquetas: true,
+          rotuladoDenso: true,
+          series: {
+            "Si": { nombre: "Polynator", color: "var(--serie-1)", tipo: "barra" },
+            "No": { nombre: "Sin Polynator", color: "var(--serie-2)", tipo: "barra" },
+          },
+        },
+        {
+          nombre: "Porcentaje de uso Polynator",
+          nota: "Polynator = Si ÷ todos los nid del mes.",
+          formato: "porcentaje",
+          kpis: [],
+          mesesPanel: 24,
+          etiquetas: true,
+          rotulosLinea: "todos",
+          guias: true,
+          series: {
+            "% de uso Polynator": { tipo: "linea", color: "var(--serie-linea)", formato: "porcentaje" },
+          },
+        },
+      ],
+    },
+  ],
+};
+
+const MES = ["ene","feb","mar","abr","may","jun","jul","ago","sept","oct","nov","dic"];
+const MES_LARGO = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+
+/* Colores claros de la paleta: el porcentaje impreso encima va en tinta, no en
+   blanco. Se declara aquí porque la paleta es fija y del estándar; deducirlo por
+   luminancia obligaría a resolver las variables CSS en tiempo de ejecución. */
+const SERIES_CLARAS = new Set(["var(--serie-2)", "var(--serie-3)", "var(--lavanda)"]);
+
+/* ---------------------------------------------- tinta sobre banda de color
+   SERIES_CLARAS era una lista de TRES tokens escrita a mano, y una pila puede
+   apilar hasta doce. Para escribir un valor dentro de la banda hace falta
+   decidir la tinta para CUALQUIER color, así que el token se resuelve contra el
+   CSS y se decide por LUMINANCIA. El cruce .179 es el de WCAG: por encima de
+   ahí el negro contrasta más que el blanco contra ese fondo. Si el token no se
+   puede resolver —CSS no cargado— cae en la lista de siempre, así que ninguna
+   área pierde el comportamiento que ya tenía.
+   ⚠ Esto también aplica al % de las barras al 100%, que antes usaba la lista:
+   los tokens que NO estaban en ella (--sec-1..--sec-5, turquesas claros)
+   escribían blanco a 1,13-2,49:1 y ahora escriben tinta. Es corrección de un
+   defecto, pero cambia píxeles: al re-sincronizar el motor, mirar impresas las
+   barras al 100% del área antes de dar por bueno el cambio. */
+const _HEX = new Map();
+</script>

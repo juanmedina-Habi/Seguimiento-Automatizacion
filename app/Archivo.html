@@ -1,0 +1,222 @@
+<script>
+/* El archivo del día. Abrir y filtrar no vuelve a consultar BigQuery. */
+const TOPE_CSV_LOCAL = 25000;
+
+function isoDeDia(n) {
+  if (n === "" || n == null) return "";
+  const dia = Number(n);
+  if (!Number.isFinite(dia)) return "";
+  return new Date(dia * 86400000).toISOString().slice(0, 10);
+}
+function decodificar(raw) {
+  const n = raw.__rows || 0;
+  const cols = {};
+  Object.keys(raw).forEach(k => {
+    if (k === "__rows") return;
+    const v = raw[k];
+    if (v && typeof v === "object" && v.d) {
+      const idx = String(v.i || "").split(",");
+      const arr = new Array(n);
+      for (let r = 0; r < n; r++) {
+        const j = Number(idx[r]);
+        arr[r] = j < 0 || !Number.isFinite(j) ? "" : (v.d[j] || "");
+      }
+      cols[k] = arr;
+      return;
+    }
+    const partes = String(v == null ? "" : v).split(",");
+    const arr = new Array(n);
+    for (let r = 0; r < n; r++) {
+      const celda = partes[r] == null ? "" : partes[r];
+      if (celda === "") arr[r] = k === "fecha" ? "" : "";
+      else arr[r] = k === "fecha" ? isoDeDia(celda) : celda;
+    }
+    cols[k] = arr;
+  });
+  return { n: n, cols: cols };
+}
+async function abrirSnapshot(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const texto = await new Response(stream).text();
+  return decodificar(JSON.parse(texto));
+}
+function catalogoCol(lista, preferido) {
+  const presentes = new Set();
+  for (let i = 0; i < lista.length; i++) {
+    const v = lista[i];
+    if (v != null && v !== "") presentes.add(String(v));
+  }
+  const cabeza = (preferido || []).filter(v => presentes.has(v));
+  const resto = [...presentes].filter(v => cabeza.indexOf(v) === -1);
+  resto.sort((a, b) => String(a).localeCompare(String(b), "es"));
+  return cabeza.concat(resto);
+}
+function mapaIndice(cat) {
+  const m = new Map();
+  cat.forEach((v, i) => m.set(v, i));
+  return m;
+}
+function prepararTablero(tabla) {
+  const c = tabla.cols;
+  const n = tabla.n;
+  const mesesSet = new Set();
+  const diasSet = new Set();
+  for (let i = 0; i < n; i++) {
+    const dia = c.fecha[i];
+    if (!dia) continue;
+    diasSet.add(dia);
+    mesesSet.add(dia.slice(0, 7) + "-01");
+  }
+  const meses = [...mesesSet].sort();
+  const dias = [...diasSet].sort();
+  const pais = catalogoCol(c.pais, ["Colombia", "Mexico"]);
+  const fase = catalogoCol(c.fase, ["Inicial", "Comite"]);
+  const area = catalogoCol(c.area);
+  const zg = catalogoCol(c.zona_grande);
+  const zm = catalogoCol(c.zm);
+  const way = catalogoCol(c.price_way, ["Automático", "Manual"]);
+  const poly = catalogoCol(c.polynator, ["Si", "No"]);
+  const ciudad = catalogoCol(c.ciudad);
+  const iDia = mapaIndice(dias);
+  const iPais = mapaIndice(pais);
+  const iFase = mapaIndice(fase);
+  const iArea = mapaIndice(area);
+  const iZg = mapaIndice(zg);
+  const iZm = mapaIndice(zm);
+  const iWay = mapaIndice(way);
+  const iPoly = mapaIndice(poly);
+  const iCiudad = mapaIndice(ciudad);
+  const det = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const nid = Number(c.nid[i]);
+    det[i] = [
+      Number.isFinite(nid) ? nid : c.nid[i],
+      iDia.get(c.fecha[i]),
+      iCiudad.get(String(c.ciudad[i] || "")),
+      iPais.get(String(c.pais[i] || "")),
+      iFase.get(String(c.fase[i] || "")),
+      iArea.get(String(c.area[i] || "")),
+      iZg.get(String(c.zona_grande[i] || "")),
+      iZm.get(String(c.zm[i] || "")),
+      iWay.get(String(c.price_way[i] || "")),
+      iPoly.get(String(c.polynator[i] || "")),
+      Number(c.en_capacity[i]) ? 1 : 0,
+    ];
+  }
+  det.sort((a, b) => (b[1] - a[1]) || ((b[0] > a[0]) - (b[0] < a[0])));
+  window.CELDAS = { meses, pais, fase, area, zg, zm, way, poly, filas: [] };
+  window.DETALLE = { dias, ciudad, filas: det };
+  window.CORTE_WBR = dias.length ? dias[dias.length - 1] : "";
+  reconstruirCeldas();
+}
+function reconstruirCeldas() {
+  const c = window.CELDAS;
+  const d = window.DETALLE;
+  if (!c || !d) return;
+  const corte = window.CORTE_WBR || "";
+  const iMes = mapaIndice(c.meses);
+  const conteo = new Map();
+  for (let i = 0; i < d.filas.length; i++) {
+    const f = d.filas[i];
+    const dia = d.dias[f[1]];
+    if (corte && dia > corte) continue;
+    const mes = iMes.get(dia.slice(0, 7) + "-01");
+    const key = mes + "|" + f[3] + "|" + f[4] + "|" + f[5] + "|" + f[6] + "|" + f[7] + "|" + f[8] + "|" + f[9] + "|" + f[10];
+    conteo.set(key, (conteo.get(key) || 0) + 1);
+  }
+  const filas = [];
+  conteo.forEach((n, key) => {
+    const p = key.split("|").map(Number);
+    p.push(n);
+    filas.push(p);
+  });
+  c.filas = filas;
+}
+function llamarServidor(nombre, arg) {
+  return new Promise((ok, mal) => {
+    const run = google.script.run.withSuccessHandler(ok).withFailureHandler(mal);
+    if (arg === undefined) run[nombre]();
+    else run[nombre](arg);
+  });
+}
+async function traerDetalle() {
+  const info = await llamarServidor("getSnapshot", "detalle");
+  if (!info || info.error) throw new Error((info && info.error) || "No se pudo leer el archivo del día");
+  if (info.actualizado) window.ACTUALIZADO_EN = info.actualizado;
+  let b64 = "";
+  const partes = info.partes || 1;
+  for (let i = 0; i < partes; i++) {
+    const trozo = await llamarServidor("getSnapshotParte", { nombre: "detalle", i: i });
+    if (!trozo || trozo.error) throw new Error((trozo && trozo.error) || "No se pudo leer el archivo del día");
+    b64 += trozo.b64 || "";
+  }
+  return abrirSnapshot(b64);
+}
+function pintarConArchivo() {
+  REPORTE = armar(filasAgregadas(), CONFIG, window.CORTE_WBR);
+  REPORTE.pais = resumenFiltro();
+  if (!document.getElementById("f-tipo")) iniciarFiltros();
+  else actualizarFiltros();
+  render();
+}
+let vigilancia = 0;
+function avisoEspera(texto) {
+  const pagina = document.getElementById("pagina");
+  if (!pagina || window.DETALLE) return;
+  pagina.innerHTML = `<p class="aviso-espera">${escapeFiltro(texto)}</p>`;
+}
+function vigilarArchivo(selloPrevio) {
+  clearInterval(vigilancia);
+  const antes = selloPrevio || "";
+  vigilancia = setInterval(async () => {
+    try {
+      const boot = await llamarServidor("getBootstrap");
+      if (!boot) return;
+      const marca = document.querySelector("#actualizacion b");
+      const mismo = (boot.actualizado || "") === antes;
+      if (!boot.corriendo && boot.errorRefresh && mismo) {
+        clearInterval(vigilancia);
+        if (marca) marca.textContent = boot.errorRefresh;
+        return;
+      }
+      if (boot.corriendo || !boot.listo || (antes && mismo)) return;
+      clearInterval(vigilancia);
+      window.ACTUALIZADO_EN = boot.actualizado || "";
+      prepararTablero(await traerDetalle());
+      pintarConArchivo();
+    } catch (e) {}
+  }, 15000);
+}
+async function mostrarArchivo(boot) {
+  window.ACTUALIZADO_EN = (boot && boot.actualizado) || "";
+  if (boot && boot.listo) {
+    const marca = document.querySelector("#actualizacion b");
+    if (marca) marca.textContent = "cargando el archivo del día…";
+    prepararTablero(await traerDetalle());
+    pintarConArchivo();
+    return;
+  }
+  if (boot && boot.owner) {
+    const prog = await llamarServidor("prepararDia");
+    if (prog && prog.error) throw new Error(prog.error);
+  }
+  const marca = document.querySelector("#actualizacion b");
+  if (marca) marca.textContent = "listo a las 7:00";
+  avisoEspera("Los datos se preparan solos todos los días a las 7:00. Esta pantalla solo los muestra. La primera vez tarda unos minutos y la gráfica aparece sola.");
+  vigilarArchivo(window.ACTUALIZADO_EN || "");
+}
+async function abrirTablero() {
+  const marca = document.querySelector("#actualizacion b");
+  if (marca) marca.textContent = "cargando…";
+  try {
+    const boot = await llamarServidor("getBootstrap");
+    if (!boot || boot.error) throw new Error((boot && boot.error) || "No se pudo abrir");
+    await mostrarArchivo(boot);
+  } catch (err) {
+    if (marca) marca.textContent = err.message || "No se pudo cargar";
+  }
+}
+</script>

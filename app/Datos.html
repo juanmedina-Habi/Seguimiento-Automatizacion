@@ -1,0 +1,199 @@
+<script>
+/* Agrupa las filas de BigQuery en las cuatro gráficas. No calcula métricas. */
+/* ------------------------------------ del formato plano al contrato de datos
+   datos.js trae la salida de la consulta TAL CUAL: una fila por indicador,
+   periodicidad y fecha. Acá se agrupa en el objeto que consume el render.
+
+   Esto NO calcula métricas: el WoW y el MoM llegan ya resueltos desde el SQL
+   (regla #6 de CLAUDE.md). Lo único que pasa acá es agrupar, ordenar y armar
+   las etiquetas en español. Es maquinaria común a todas las áreas — si le
+   encuentras un error, va por PR a la plantilla, no parcheado en tu copia. */
+
+// Orden de los KPIs. Es fijo para que todas las áreas se vean igual en el PDF
+// consolidado; los que el SQL no devuelva salen como "—".
+/* Catálogo de KPIs: periodicidad -> etiqueta y formato.
+   Un indicador muestra por omisión los cuatro primeros (es lo que traía la
+   plantilla y lo que usan las áreas ya migradas). Si el tablero de un área
+   muestra otro juego —Liquidez pone Meta y Cumplimiento, y su indicador de
+   rotación no tiene MTD ni MoM— se declara `kpis: [...]` en su CONFIG. */
+const CATALOGO_KPIS = {
+  wow:          { etiqueta: "WoW",              formato: "variacion" },
+  mtd_actual:   { etiqueta: "MTD mes actual",   formato: null },
+  mtd_anterior: { etiqueta: "MTD mes anterior", formato: null },
+  mom:          { etiqueta: "MoM",              formato: "variacion" },
+  meta:         { etiqueta: "Meta mes corrido", formato: null, tono: "meta" },
+  // El cumplimiento se pinta contra el 100%: verde si llega, rojo si no.
+  /* El cumplimiento SIEMPRE se lee «más es mejor», también en los indicadores con
+     `menosEsMejor`. No es una excepción olvidada: cuando la meta es un techo —una
+     rotación en días, un porcentaje de gasto— la consulta emite el cumplimiento
+     como `meta / real`, y esa división ya invierte el sentido. Una rotación de 48
+     días contra una meta de 7 da 14,58%, que es bajo y es malo; si la rotación
+     mejorara a 5 días daría 140%, que es alto y es bueno.
+
+     Se intentó invertir este tono junto con el de la variación y quedó al revés:
+     ese 14,58% salía en VERDE. `menosEsMejor` invierte la VARIACIÓN y nada más.
+
+     Lo que sí hay que cuidar es del lado del SQL: si un área emite el cumplimiento
+     como `real / meta` con una meta que es techo, el color va a mentir. La
+     convención del repo es `meta / real` en ese caso. */
+  cumplimiento: { etiqueta: "Cumplimiento",     formato: "porcentaje",
+                  tono: v => v >= 100 ? "pos" : "neg" },
+};
+const KPIS_POR_OMISION = ["wow", "mtd_actual", "mtd_anterior", "mom"];
+
+function etiqueta(iso, periodicidad) {
+  const [a, m, d] = iso.split("-");
+  return periodicidad === "semanal"
+    ? [`${+d} ${MES[+m - 1]}`, a, iso]     // 27 jul / 2026
+    : [MES[+m - 1], a, iso];               // jul / 2026
+}
+
+function armar(filas, config, corte) {
+  if (Array.isArray(filas[0])) filas = filas[0];   // bq envuelve los scripts (DECLARE)
+
+  // indicador -> periodicidad -> serie -> filas. La columna `serie` es opcional:
+  // cuando la consulta no la trae, el indicador tiene una sola serie que se llama
+  // como él, que es el caso de las áreas con un solo trazo por gráfica.
+  const por = {};
+  for (const f of filas) {
+    const ind = por[f.indicador] || (por[f.indicador] = {});
+    const per = ind[f.periodicidad] || (ind[f.periodicidad] = {});
+    const nom = f.serie || f.indicador;
+    (per[nom] || (per[nom] = [])).push({
+      fecha: f.fecha,
+      valor: f.valor == null || f.valor === "" ? null : Number(f.valor),
+    });
+  }
+
+  // El valor de un KPI es una fila suelta. Cuando el indicador tiene varias series
+  // manda la PRIMERA declarada en CONFIG, que es la que da el título a la gráfica:
+  // el MTD de Radicaciones es el conteo, no el monto que lo acompaña como línea.
+  const escalar = (nombre, periodicidad, cfg = {}) => {
+    const per = por[nombre]?.[periodicidad];
+    if (!per) return null;
+    const declaradas = Object.keys(cfg.series || {});
+    const orden = [...declaradas.filter(n => per[n]),
+                   ...Object.keys(per).filter(n => !declaradas.includes(n))];
+    for (const n of orden) {
+      const lista = per[n];
+      if (lista?.length && lista[0].valor != null) return lista[0].valor;
+    }
+    return null;
+  };
+
+  const PALETA = ["var(--serie-1)", "var(--serie-2)", "var(--serie-3)",
+                  "var(--serie-4)", "var(--serie-5)", "var(--serie-6)"];
+
+  /* Cohorte: la matriz triangular de "de lo que pasó en esta semana, cuánto se
+     había resuelto N semanas después". Entra por el mismo formato largo que todo
+     lo demás —una fila por cohorte y periodo relativo— con la `serie` haciendo de
+     columna: S0, S1, … S7+ en la semanal y M0, M1, … M7+ en la mensual.
+     El triángulo sale solo: las cohortes recientes no tienen las columnas lejanas
+     todavía, así que la consulta no devuelve esas filas y la celda queda vacía. */
+  const cohorte = (nombre, periodicidad, cfg) => {
+    const per = por[nombre]?.[periodicidad];
+    if (!per) return undefined;
+    // S10 iría después de S9, no entre S1 y S2: se ordena por el número, no por texto.
+    const columnas = Object.keys(per).sort(
+      (a, b) => (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0));
+    const fechas = [...new Set(columnas.flatMap(c => per[c].map(f => f.fecha)))].sort();
+    if (!fechas.length) return undefined;
+
+    const formato = cfg.formatoCohorte || "porcentaje_0";
+    const rotulo = iso => {
+      const [a, m, d] = iso.split("-");
+      return periodicidad === "cohorte_semanal" ? `${+d} ${MES[+m - 1]} ${a}` : `${MES[+m - 1]} ${a}`;
+    };
+    return {
+      encabezados: [periodicidad === "cohorte_semanal" ? "semana" : "mes", ...columnas],
+      filas: fechas.map(f => [
+        rotulo(f),
+        ...columnas.map(c => {
+          const v = per[c].find(x => x.fecha === f)?.valor;
+          return v == null ? "" : fmt(v, formato);
+        }),
+      ]),
+    };
+  };
+
+  /* Una opción de rotulado puede valer distinto en cada panel: 8 ranuras de
+     34 pt y 13 de 18,5 pt no admiten lo mismo. Se acepta el valor suelto (vale
+     para los dos) o {semanal, mensual}. */
+  const porPanel = (v, periodicidad) =>
+    (v && typeof v === "object" && !Array.isArray(v)) ? v[periodicidad] : v;
+
+  const grafica = (nombre, periodicidad, cfg) => {
+    const per = por[nombre]?.[periodicidad];
+    if (!per) return undefined;
+    // Orden de series: el declarado en CONFIG manda; lo no declarado va después.
+    const declaradas = Object.keys(cfg.series || {});
+    const nombres = [...declaradas.filter(n => per[n]),
+                     ...Object.keys(per).filter(n => !declaradas.includes(n))];
+    if (!nombres.length) return undefined;
+
+    // Eje común: la unión de todas las fechas, para que las series queden alineadas
+    // aunque alguna no tenga dato en algún periodo.
+    const fechas = [...new Set(nombres.flatMap(n => per[n].map(f => f.fecha)))].sort();
+    return {
+      categorias: fechas.map(f => etiqueta(f, periodicidad)),
+      formato: cfg.formato || "entero",
+      agrupadas: cfg.agrupadas,
+      porcentaje100: cfg.porcentaje100,
+      ejeDerecho: cfg.ejeDerecho,
+      ejeCompartido: cfg.ejeCompartido,
+      etiquetas: cfg.etiquetas,
+      // Opciones de rotulado. Van al lado de las que ya existían: son del
+      // CATÁLOGO (el área las escoge, no las inventa), y hay que documentarlas
+      // en el bloque-contrato «GRÁFICA = {...}».
+      rotuladoDenso: porPanel(cfg.rotuladoDenso, periodicidad),
+      rotulosLinea: porPanel(cfg.rotulosLinea, periodicidad),
+      rotulosTotal: porPanel(cfg.rotulosTotal, periodicidad),
+      topeEjeDerecho: porPanel(cfg.topeEjeDerecho, periodicidad),
+      guias: porPanel(cfg.guias, periodicidad),
+      series: nombres.map((n, i) => {
+        const sc = (cfg.series || {})[n] || {};
+        const mapa = new Map(per[n].map(f => [f.fecha, f.valor]));
+        return {
+          nombre: sc.nombre || n,
+          color: sc.color || (nombres.length === 1 ? (cfg.color || PALETA[0]) : PALETA[i % PALETA.length]),
+          tipo: sc.tipo || (nombres.length === 1 ? (cfg.tipo || "barra") : "barra"),
+          formato: sc.formato,
+          grupo: sc.grupo,
+          valores: fechas.map(f => mapa.has(f) ? mapa.get(f) : null),
+        };
+      }),
+    };
+  };
+
+  return {
+    area: config.area, pais: config.pais, corte,
+    secciones: (config.secciones || []).map(s => ({
+      ...s,
+      indicadores: (s.indicadores || []).map(cfg => ({
+        ...cfg,
+        // Cada KPI es la periodicidad, o {k, etiqueta} si el área la rotula distinto:
+        // la meta de un indicador puede ser del mes corrido y la de otro, fija.
+        kpis: (cfg.kpis || KPIS_POR_OMISION).map(entrada => {
+          const periodicidad = typeof entrada === "string" ? entrada : entrada.k;
+          const base = CATALOGO_KPIS[periodicidad] || { etiqueta: periodicidad, formato: null };
+          const def = typeof entrada === "string" ? base : { ...base, ...entrada };
+          const v = escalar(cfg.nombre, periodicidad, cfg);
+          return {
+            clave: periodicidad,          // la lee el verificador para comprobar el orden
+            valor: v === null ? "—" : v,
+            etiqueta: def.etiqueta,
+            tono: v === null ? undefined
+                 : (typeof def.tono === "function" ? def.tono(v, cfg) : def.tono),
+            formato: v === null ? "texto" : (def.formato || cfg.formatoKpi || cfg.formato || "entero"),
+          };
+        }),
+        semanal: grafica(cfg.nombre, "semanal", cfg),
+        mensual: grafica(cfg.nombre, "mensual", cfg),
+        ordenSeries: Object.keys(cfg.series || {}),
+        cohorteSemanal: cohorte(cfg.nombre, "cohorte_semanal", cfg),
+        cohorteMensual: cohorte(cfg.nombre, "cohorte_mensual", cfg),
+      })),
+    })),
+  };
+}
+</script>

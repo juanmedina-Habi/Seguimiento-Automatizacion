@@ -1,0 +1,283 @@
+<script>
+/* Tipo, país, fase, área y zonas. */
+/* --------------------------------------------------------- filtros de pantalla
+   datos.js trae el grano (mes × país × fase × zona × método × polynator), no
+   las cuatro series ya sumadas. Cada cambio de filtro recuenta y vuelve a
+   armar el reporte. Vacío significa «todas», que es como abre el tablero. */
+const ETIQUETA_FILTRO = { Mexico: "México", Comite: "Comité" };
+const estadoFiltro = {
+  tipo: "General",
+  pais: null,
+  fase: new Set(),
+  area: new Set(),
+  zg: new Set(),
+  zm: new Set(),
+};
+const widgetsFiltro = [];
+
+function rotuloFiltro(v) { return ETIQUETA_FILTRO[v] || v; }
+function normFiltro(s) {
+  return String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+function escapeFiltro(s) {
+  return String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+}
+function pasaFiltro(f, excepto) {
+  const e = estadoFiltro;
+  if (e.tipo === "Capacity" && f[8] !== 1) return false;
+  if (excepto !== "pais" && e.pais != null && f[1] !== e.pais) return false;
+  if (excepto !== "fase" && e.fase.size && !e.fase.has(f[2])) return false;
+  if (excepto !== "area" && e.area.size && !e.area.has(f[3])) return false;
+  if (excepto !== "zg" && e.zg.size && !e.zg.has(f[4])) return false;
+  if (excepto !== "zm" && e.zm.size && !e.zm.has(f[5])) return false;
+  return true;
+}
+function opcionesFiltro() {
+  const op = { pais: new Set(), fase: new Set(), area: new Set(), zg: new Set(), zm: new Set() };
+  for (const f of window.CELDAS.filas) {
+    if (pasaFiltro(f, "pais")) op.pais.add(f[1]);
+    if (pasaFiltro(f, "fase")) op.fase.add(f[2]);
+    if (pasaFiltro(f, "area")) op.area.add(f[3]);
+    if (pasaFiltro(f, "zg")) op.zg.add(f[4]);
+    if (pasaFiltro(f, "zm")) op.zm.add(f[5]);
+  }
+  return op;
+}
+function podarFiltro(excepto) {
+  if (!window.CELDAS || !window.CELDAS.filas || !window.CELDAS.filas.length) return;
+  const op = opcionesFiltro();
+  if (excepto !== "pais" && estadoFiltro.pais != null && !op.pais.has(estadoFiltro.pais))
+    estadoFiltro.pais = null;
+  for (const clave of ["fase", "area", "zg", "zm"]) {
+    if (clave === excepto) continue;
+    for (const v of [...estadoFiltro[clave]]) {
+      if (!op[clave].has(v)) estadoFiltro[clave].delete(v);
+    }
+  }
+}
+function filasAgregadas() {
+  const c = window.CELDAS;
+  const iAuto = c.way.indexOf("Automático");
+  const iManual = c.way.indexOf("Manual");
+  const iSi = c.poly.indexOf("Si");
+  const iNo = c.poly.indexOf("No");
+  const auto = new Map(), manual = new Map(), si = new Map(), no = new Map();
+  for (const f of c.filas) {
+    if (!pasaFiltro(f)) continue;
+    const mes = c.meses[f[0]];
+    const n = f[9];
+    if (f[6] === iAuto) auto.set(mes, (auto.get(mes) || 0) + n);
+    else if (f[6] === iManual) manual.set(mes, (manual.get(mes) || 0) + n);
+    if (f[7] === iSi) si.set(mes, (si.get(mes) || 0) + n);
+    else if (f[7] === iNo) no.set(mes, (no.get(mes) || 0) + n);
+  }
+  const filas = [];
+  const meses = new Set([...auto.keys(), ...manual.keys(), ...si.keys(), ...no.keys()]);
+  for (const mes of meses) {
+    const a = auto.get(mes) || 0;
+    const m = manual.get(mes) || 0;
+    const s = si.get(mes) || 0;
+    const o = no.get(mes) || 0;
+    if (a) filas.push({ indicador: "Nivel de automatización", serie: "Automático", periodicidad: "mensual", fecha: mes, valor: a });
+    if (m) filas.push({ indicador: "Nivel de automatización", serie: "Manual", periodicidad: "mensual", fecha: mes, valor: m });
+    if (a + m) filas.push({ indicador: "Porcentaje de automatización", serie: "% de automatización", periodicidad: "mensual", fecha: mes, valor: a / (a + m) * 100 });
+    if (s) filas.push({ indicador: "Precios usando Polynator", serie: "Si", periodicidad: "mensual", fecha: mes, valor: s });
+    if (o) filas.push({ indicador: "Precios usando Polynator", serie: "No", periodicidad: "mensual", fecha: mes, valor: o });
+    if (s + o) filas.push({ indicador: "Porcentaje de uso Polynator", serie: "% de uso Polynator", periodicidad: "mensual", fecha: mes, valor: s / (s + o) * 100 });
+  }
+  return filas;
+}
+function trozoFiltro(set, catalogo, plural) {
+  if (!set.size) return "";
+  if (set.size <= 2) return [...set].map(i => rotuloFiltro(catalogo[i])).join(", ");
+  return `${set.size} ${plural}`;
+}
+function resumenFiltro() {
+  const c = window.CELDAS;
+  const pais = estadoFiltro.pais == null ? "Colombia y México" : rotuloFiltro(c.pais[estadoFiltro.pais]);
+  return estadoFiltro.tipo === "General" ? pais : `Capacity · ${pais}`;
+}
+function detalleFiltro() {
+  if (!window.CELDAS) return "";
+  const c = window.CELDAS;
+  const partes = [];
+  if (estadoFiltro.tipo !== "General") partes.push("Tipo Capacity");
+  if (estadoFiltro.pais != null) partes.push(rotuloFiltro(c.pais[estadoFiltro.pais]));
+  for (const t of [
+    trozoFiltro(estadoFiltro.fase, c.fase, "fases"),
+    trozoFiltro(estadoFiltro.area, c.area, "áreas"),
+    trozoFiltro(estadoFiltro.zg, c.zg, "zonas grandes"),
+    trozoFiltro(estadoFiltro.zm, c.zm, "zonas medianas"),
+  ]) if (t) partes.push(t);
+  return partes.length ? partes.join(" · ") : "";
+}
+
+function aplicarFiltro(excepto) {
+  podarFiltro(excepto);
+  estadoDetalle.automatizacion.pagina = 0;
+  estadoDetalle.polynator.pagina = 0;
+  if (!(window.CELDAS && window.CELDAS.filas)) return;
+  REPORTE = armar(filasAgregadas(), CONFIG, window.CORTE_WBR);
+  REPORTE.pais = resumenFiltro();
+  const input = document.getElementById("corte");
+  if (input) input.value = REPORTE.corte;
+  render();
+  actualizarFiltros();
+}
+function cerrarPanelesFiltro() {
+  document.querySelectorAll(".filtro-panel").forEach(p => { p.hidden = true; });
+}
+function actualizarFiltros() {
+  const tipo = document.getElementById("f-tipo");
+  const pais = document.getElementById("f-pais");
+  if (!tipo || !pais) return;
+  tipo.value = estadoFiltro.tipo;
+  pais.value = estadoFiltro.pais == null ? "" : String(estadoFiltro.pais);
+  document.querySelectorAll("#f-fases button").forEach(el => {
+    const on = estadoFiltro.fase.has(+el.dataset.i);
+    el.classList.toggle("activa", on);
+    el.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  const nota = document.getElementById("f-nota");
+  if (nota) nota.hidden = estadoFiltro.tipo !== "Capacity";
+  for (const w of widgetsFiltro) w.refrescar();
+}
+function widgetFiltro(contenedor, titulo, catalogo, set, clave) {
+  contenedor.className = "filtro";
+  contenedor.innerHTML = `
+    <span class="filtro-etiq">${titulo}</span>
+    <button type="button" class="filtro-btn"></button>
+    <div class="filtro-panel" hidden>
+      <input type="search" placeholder="Buscar" aria-label="Buscar ${titulo}">
+      <button type="button" class="filtro-todas">Todas</button>
+      <div class="filtro-lista"></div>
+    </div>`;
+  const btn = contenedor.querySelector(".filtro-btn");
+  const panel = contenedor.querySelector(".filtro-panel");
+  const busca = contenedor.querySelector("input");
+  const lista = contenedor.querySelector(".filtro-lista");
+  const texto = () => {
+    if (!set.size) return "Todas";
+    if (set.size === 1) return rotuloFiltro(catalogo[[...set][0]]);
+    return `${set.size} seleccionadas`;
+  };
+  const pintarLista = () => {
+    const q = normFiltro(busca.value.trim());
+    const validas = opcionesFiltro()[clave];
+    const items = [];
+    catalogo.forEach((nombre, i) => {
+      if (!validas.has(i)) return;
+      const sel = set.has(i);
+      if (q && !normFiltro(nombre).includes(q) && !sel) return;
+      items.push({ i, nombre, sel });
+    });
+    items.sort((a, b) => (b.sel - a.sel) || a.nombre.localeCompare(b.nombre, "es"));
+    const tope = catalogo.length <= 30 ? items.length : (q ? 40 : 60);
+    const visibles = items.slice(0, tope);
+    const resto = items.length - visibles.length;
+    lista.innerHTML = visibles.map(it => `
+      <label><input type="checkbox" data-i="${it.i}" ${it.sel ? "checked" : ""}> ${escapeFiltro(rotuloFiltro(it.nombre))}</label>`
+    ).join("")
+      + (resto > 0 ? `<p class="filtro-mas">Hay ${resto} más. Escribe para acotar.</p>` : "")
+      + (visibles.length ? "" : `<p class="filtro-mas">Sin coincidencias.</p>`);
+  };
+  btn.textContent = texto();
+  btn.addEventListener("click", () => {
+    const abrir = panel.hidden;
+    cerrarPanelesFiltro();
+    if (abrir) { panel.hidden = false; pintarLista(); busca.focus(); }
+  });
+  contenedor.querySelector(".filtro-todas").addEventListener("click", () => {
+    set.clear();
+    aplicarFiltro(clave);
+  });
+  busca.addEventListener("input", pintarLista);
+  lista.addEventListener("change", e => {
+    const i = +e.target.dataset.i;
+    if (e.target.checked) set.add(i); else set.delete(i);
+    aplicarFiltro(clave);
+  });
+  const api = { refrescar() { btn.textContent = texto(); if (!panel.hidden) pintarLista(); } };
+  widgetsFiltro.push(api);
+}
+function iniciarFiltros() {
+  const raiz = document.getElementById("filtros");
+  if (!window.CELDAS) { raiz.hidden = true; return; }
+  const c = window.CELDAS;
+  raiz.hidden = false;
+  raiz.innerHTML = `
+    <div class="filtros-cab">
+      <div>
+        <h2>Filtros del reporte</h2>
+        <p>El recorte se aplica al momento, en las gráficas y en la tabla.</p>
+      </div>
+      <button type="button" class="btn-limpiar" id="f-limpiar">Limpiar</button>
+    </div>
+    <div class="filtros-rejilla">
+      <label class="filtro-fijo"><span>Ver hasta</span>
+        <input type="date" id="corte">
+      </label>
+      <label class="filtro-fijo"><span>País</span><select id="f-pais"></select></label>
+      <label class="filtro-fijo"><span>Tipo</span>
+        <select id="f-tipo">
+          <option value="General">General</option>
+          <option value="Capacity">Capacity</option>
+        </select>
+      </label>
+      <div class="filtro-fijo"><span>Fase</span><div class="fase-pills" id="f-fases"></div></div>
+      <div id="f-area"></div>
+      <div id="f-zg"></div>
+      <div id="f-zm"></div>
+    </div>
+    <p class="filtros-nota" id="f-nota" hidden>Capacity deja fuera la fase Inicial cuando el inmueble no fue priceado.</p>
+    <p class="filtros-ayuda">Pasa el cursor sobre un mes para ver el detalle. Sin fase marcada entran Inicial y Comité.</p>`;
+  const selPais = document.getElementById("f-pais");
+  selPais.innerHTML = `<option value="">Todos</option>`
+    + c.pais.map((p, i) => `<option value="${i}">${escapeFiltro(rotuloFiltro(p))}</option>`).join("");
+  document.getElementById("f-fases").innerHTML = c.fase.map((nombre, i) =>
+    `<button type="button" data-i="${i}" aria-pressed="false">${escapeFiltro(rotuloFiltro(nombre))}</button>`).join("");
+  const inputCorte = document.getElementById("corte");
+  inputCorte.value = REPORTE.corte;
+  inputCorte.addEventListener("change", e => {
+    if (!e.target.value) { e.target.value = REPORTE.corte; return; }
+    window.CORTE_WBR = e.target.value;
+    REPORTE.corte = e.target.value;
+    if (window.DETALLE && window.CELDAS) reconstruirCeldas();
+    aplicarFiltro("corte");
+  });
+  widgetFiltro(document.getElementById("f-area"), "Área metropolitana", c.area, estadoFiltro.area, "area");
+  widgetFiltro(document.getElementById("f-zg"), "Zona grande", c.zg, estadoFiltro.zg, "zg");
+  widgetFiltro(document.getElementById("f-zm"), "Zona mediana", c.zm, estadoFiltro.zm, "zm");
+  document.getElementById("f-tipo").addEventListener("change", e => {
+    estadoFiltro.tipo = e.target.value;
+    aplicarFiltro("tipo");
+  });
+  selPais.addEventListener("change", e => {
+    estadoFiltro.pais = e.target.value === "" ? null : +e.target.value;
+    aplicarFiltro("pais");
+  });
+  document.getElementById("f-fases").addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    const i = +b.dataset.i;
+    if (estadoFiltro.fase.has(i)) estadoFiltro.fase.delete(i); else estadoFiltro.fase.add(i);
+    aplicarFiltro("fase");
+  });
+  document.getElementById("f-limpiar").addEventListener("click", () => {
+    estadoFiltro.tipo = "General";
+    estadoFiltro.pais = null;
+    estadoFiltro.fase.clear();
+    estadoFiltro.area.clear();
+    estadoFiltro.zg.clear();
+    estadoFiltro.zm.clear();
+    document.querySelectorAll(".filtro-panel input").forEach(el => { el.value = ""; });
+    aplicarFiltro();
+  });
+  document.addEventListener("click", e => {
+    if (!e.target.closest(".filtro")) cerrarPanelesFiltro();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") cerrarPanelesFiltro();
+  });
+}
+</script>

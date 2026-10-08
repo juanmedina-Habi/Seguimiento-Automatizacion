@@ -1,0 +1,687 @@
+/* Marco, gráficas, filtros y tabla. Las fuentes están en Fuentes.html. */
+/* ===========================================================================
+   PLANTILLA ESTÁNDAR DEL WBR — HABI
+   ---------------------------------------------------------------------------
+   ESTE CSS NO SE TOCA.
+
+   Todas las áreas usan la misma plantilla porque los PDF se consolidan en un
+   solo documento. Si cada equipo ajusta colores, tamaños o espaciados, el
+   documento de la reunión queda desparejo y quien lo consolida no puede
+   arreglarlo. Cambios al diseño van por PR al repo común.
+
+   Geometría: 864 pt de ancho, alto libre. Es el formato de las páginas del
+   consolidado. Los tamaños van en pt para que la pantalla y el PDF coincidan.
+
+   Estructura de cada indicador:
+     ┌─────────────────────────────────────────────┬──────────────────┐
+     │ franja gris: nombre                  sello  │                  │
+     │ KPIs                                        │   COMENTARIOS    │
+     │ gráfica semanal      │   gráfica mensual     │   leyenda        │
+     └─────────────────────────────────────────────┴──────────────────┘
+   ========================================================================= */
+
+
+
+:root {
+  /* ---------------------------------------------------------------------
+     Sistema de diseño Habi v2 — ver comun/V2-HABI-DESIGN.md.
+     Los nombres de las variables se conservan para no romper los archivos de
+     área; lo que cambia es el valor, alineado al token del sistema.
+     --------------------------------------------------------------------- */
+
+  /* Marca — brand.primary / hover / subtle */
+  --morado: #7E22CE;
+  --lavanda: #FAF5FF;
+  --barra: #A855F7;
+  --barra-foco: #6B21A8;
+
+  /* Paleta de series — support palette del sistema, EN ESTE ORDEN.
+     El sistema prohíbe usar el morado de marca como color de serie: el morado
+     es identidad e interacción, no dato. Por eso las barras salen de la paleta
+     de apoyo y `--morado` se reserva para tapa, bandas y metas.
+
+     El sistema solo define CUATRO colores de apoyo y acá hacen falta seis: los
+     tickets de Brokers apilan 19 motivos y el monto desembolsado, 8 entidades.
+     --serie-4 y --serie-6 son tonos oscuros derivados de la misma familia, no
+     tokens del sistema.
+     [DECISIÓN ABIERTA: formalizarlos en el sistema o agrupar la cola en
+      «Otras categorías», como ya hace el tablero en algunos indicadores.]
+
+     El ORDEN tampoco es el del sistema (turquesa → cyan → coral → purple-alt),
+     y es deliberado: allá las series se comparan lado a lado, acá se apilan y
+     se agrupan, así que lo que manda es el contraste entre CONSECUTIVAS. Cyan
+     pegado a turquesa desaparecía en las barras agrupadas de Liquidez. */
+  --serie-1: #A855F7;   /* support.purple-alt */
+  --serie-2: #2DD4BF;   /* support.turquoise */
+  --serie-3: #FB7185;   /* support.coral */
+  --serie-4: #22D3EE;   /* support.cyan */
+  --serie-5: #0F766E;   /* derivado: turquesa oscuro */
+  --serie-6: #BE185D;   /* derivado: coral oscuro */
+  --serie-linea: #134E4A; /* líneas sobre barras: oscuro, no morado */
+  --serie-negra: #171717; /* text.primary — rotaciones, días */
+
+  /* ---------------------------------------------------------------------
+     CATEGÓRICA — --cat-1 … --cat-12
+
+     Para desgloses de MUCHAS categorías sin orden entre ellas: motivos de un
+     ticket, entidades, causales. Es un tipo de paleta distinto de --serie-*,
+     no una extensión por comodidad: --serie-* asume pocas series comparables
+     y con un orden implícito, y deja de funcionar pasadas seis.
+
+     Las seis primeras SON las de --serie-* a propósito: un área que crece de
+     cinco categorías a nueve no debería ver cambiar de color las cinco que
+     ya tenía.
+
+     Criterios, en este orden:
+       1. contraste entre CONSECUTIVAS, porque se apilan;
+       2. claridad alternada, para que sobrevivan impresas en blanco y negro;
+       3. ningún morado de marca — es identidad, no dato.
+
+     El tope de doce no es técnico. Una barra apilada de diecinueve colores no
+     se lee: pasadas doce categorías, agrupa la cola en «Otras» —como ya hace
+     el tablero en varios indicadores— y quédate con las once más grandes.
+     Pedir el color trece es casi siempre señal de que falta agrupar.
+     --------------------------------------------------------------------- */
+  --cat-1:  #A855F7;   /* = --serie-1 · support.purple-alt */
+  --cat-2:  #2DD4BF;   /* = --serie-2 · support.turquoise */
+  --cat-3:  #FB7185;   /* = --serie-3 · support.coral     */
+  --cat-4:  #22D3EE;   /* = --serie-4 · support.cyan      */
+  --cat-5:  #0F766E;   /* = --serie-5 · turquesa oscuro   */
+  --cat-6:  #BE185D;   /* = --serie-6 · coral oscuro      */
+  --cat-7:  #F59E0B;   /* ámbar          */
+  --cat-8:  #1D4ED8;   /* azul profundo  */
+  --cat-9:  #84CC16;   /* lima           */
+  --cat-10: #7C2D12;   /* tierra oscuro  */
+  --cat-11: #A5B4FC;   /* índigo claro   */
+  --cat-12: #525252;   /* neutro         */
+
+  /* ---------------------------------------------------------------------
+     SECUENCIAL — --sec-1 (más claro) … --sec-6 (más oscuro)
+
+     Para magnitud ORDENADA: la maduración de una cosecha, rangos de mora,
+     tramos de antigüedad. Un solo tono variando en claridad, para que el
+     orden se lea sin recurrir a la leyenda y sobreviva impreso en gris.
+
+     No uses --cat-* para esto: colores distintos para valores ordenados
+     hacen que el lector busque un significado categórico que no existe.
+     --------------------------------------------------------------------- */
+  --sec-1: #CCFBF1;
+  --sec-2: #99F6E4;
+  --sec-3: #5EEAD4;
+  --sec-4: #2DD4BF;
+  --sec-5: #14B8A6;
+  --sec-6: #0F766E;
+
+  /* ---------------------------------------------------------------------
+     SEMÁNTICA — significado FIJO en todos los reportes
+
+     Cuando una categoría significa lo mismo en dos áreas, tiene que verse
+     igual en las dos. Que «desistido» salga rojo en un reporte y turquesa en
+     otro es un error de lectura, peor que cualquier desalineación de layout.
+     Este es el único grupo donde hace falta MÁS control central, no menos:
+     no se redefine por área ni se usa para categorías sin esa carga.
+     --------------------------------------------------------------------- */
+  --estado-bueno:  #15803D;   /* logrado, al día, aprobado   */
+  --estado-malo:   #B91C1C;   /* perdido, desistido, vencido */
+  --estado-alerta: #A16207;   /* en riesgo, por vencer       */
+  --estado-info:   #1D4ED8;   /* informativo, en trámite     */
+  --estado-neutro: #737373;   /* sin dato, no aplica         */
+
+  /* Semántica — el sistema pide el rojo profundo (red/700), no el brillante */
+  --verde: #15803D;
+  --rojo: #B91C1C;
+  --naranja-txt: #A16207;
+  --meta: #7E22CE;
+
+  /* Neutros — Tailwind Neutral puro */
+  --franja: #F5F5F5;
+  --linea: #E5E5E5;
+  --linea-fuerte: #D4D4D4;
+  --tinta: #171717;
+  --tinta-suave: #737373;
+  --tinta-media: #404040;
+  --resalte: #FEFCE8;
+}
+
+/* =======================================================================
+   TOKENS DEL ÁREA — el único lugar donde un área escribe un color propio
+
+   Todo lo de arriba es el catálogo común y no se redefine desde la carpeta
+   de un área. Pero el catálogo no puede anticiparlo todo, y cuando no
+   alcanza el camino no es forkear la plantilla: es declarar acá el token
+   que falta, con el prefijo --area-, y decir para qué es.
+
+   Reglas:
+     · el prefijo --area- es obligatorio; el verificador lo reconoce y lista
+       cada token como excepción declarada, así la excepción se ve en vez de
+       esconderse;
+     · nunca redefinas un token del marco, del catálogo ni de la semántica —
+       eso rompe el PDF consolidado y el verificador lo marca en rojo;
+     · un color literal fuera de este bloque falla la verificación.
+
+   Y una regla de promoción: cuando DOS áreas declaran lo mismo, se sube al
+   catálogo por PR a este archivo. Así la paleta crece con evidencia y no por
+   especulación. Cómo se propone está en comun/PROPONER-AL-CATALOGO.md.
+
+   Ejemplo:
+     --area-canal-mayorista: #0369A1;   ·  canal exclusivo de Brokers
+   ======================================================================= */
+:root {
+  /* Tu área declara sus tokens acá. Vacío por omisión. */
+}
+
+* , *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0; background: #FAFAFA; color: var(--tinta);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================ barra de trabajo — no sale en el PDF ======== */
+.barra-trabajo {
+  position: sticky; top: 0; z-index: 20;
+  background: #1c1c20; color: #e8e8ea; font-size: 11px; line-height: 1.4;
+  padding: 8px 16px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.barra-trabajo strong { font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
+.barra-trabajo label { display: flex; align-items: center; gap: 6px; color: #b9b9c2; }
+.barra-trabajo input[type="date"] {
+  font: inherit; background: #2a2a31; color: #e8e8ea;
+  border: 1px solid #3d3d47; border-radius: 3px; padding: 2px 6px;
+}
+.barra-trabajo input[type="checkbox"] { accent-color: var(--barra); }
+.barra-trabajo .der { margin-left: auto; color: #8b8b96; }
+.barra-trabajo kbd {
+  background: #2a2a31; border: 1px solid #3d3d47; border-radius: 3px;
+  padding: 1px 5px; font-family: ui-monospace, monospace; font-size: 10px;
+}
+.btn {
+  font: inherit; font-size: 11px; cursor: pointer; color: #e8e8ea;
+  background: #33333c; border: 1px solid #45454f; border-radius: 3px; padding: 3px 9px;
+}
+.btn:hover { border-color: var(--barra); color: #fff; }
+.btn:focus-visible { outline: 2px solid var(--barra); outline-offset: 2px; }
+.fuente::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: #7ee2a8; margin-right: 6px; vertical-align: 1px;
+}
+.fuente.demo::before { background: #d9a020; }
+
+/* Filtros de pantalla. No entran al PDF: la página impresa es el recorte
+   que quedó elegido, y el detalle va en la línea de corte. */
+.controles-pantalla { position: sticky; top: 0; z-index: 20; }
+.controles-pantalla .barra-trabajo { position: static; }
+.filtros {
+  background: #fff; color: var(--tinta); border-bottom: 1px solid #e4e4e7;
+  padding: 8px 16px 10px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end;
+  font-size: 12px;
+}
+.filtros[hidden] { display: none; }
+.filtro-fijo, .filtro-fases { display: flex; flex-direction: column; gap: 3px; margin: 0; border: 0; padding: 0; }
+.filtro-fijo span, .filtro-fases legend, .filtro-etiq {
+  font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: #71717a;
+}
+.filtro-fases legend { padding: 0; }
+.filtro-fijo select, .filtro-btn, .filtro-fases {
+  font: inherit; font-size: 12px; color: var(--tinta);
+  background: #fff; border: 1px solid #d4d4d8; border-radius: 3px;
+}
+.filtro-fijo select, .filtro-btn { padding: 4px 8px; min-width: 128px; }
+.filtro-btn { text-align: left; cursor: pointer; }
+.filtro-btn:hover, .filtro-fijo select:hover { border-color: #7E22CE; }
+.filtro-fases { flex-direction: row; align-items: center; gap: 10px; padding: 4px 8px; }
+.filtro-fases label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.filtro { position: relative; display: flex; flex-direction: column; gap: 3px; }
+.filtro-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30;
+  width: 280px; background: #fff; border: 1px solid #d4d4d8; border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .12); padding: 8px;
+}
+.filtro-panel[hidden] { display: none; }
+.filtro-panel input[type="search"] {
+  width: 100%; font: inherit; font-size: 12px; padding: 4px 6px;
+  border: 1px solid #d4d4d8; border-radius: 3px;
+}
+.filtro-todas {
+  font: inherit; font-size: 11px; margin: 6px 0; padding: 0; border: 0;
+  background: none; color: #7E22CE; cursor: pointer;
+}
+.filtro-lista { max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.filtro-lista label { display: flex; gap: 6px; align-items: flex-start; padding: 2px 0; cursor: pointer; }
+.filtro-mas { margin: 6px 0 0; font-size: 11px; color: #71717a; }
+.filtros-limpiar {
+  font: inherit; font-size: 12px; cursor: pointer; color: #3f3f46;
+  background: #f4f4f5; border: 1px solid #d4d4d8; border-radius: 3px; padding: 4px 8px;
+}
+.filtros-nota { flex-basis: 100%; margin: 0; font-size: 11px; color: #71717a; }
+.filtros-nota[hidden] { display: none; }
+
+.detalle { padding: 0 12pt 16pt; }
+.detalle-bar {
+  display: flex; align-items: center; gap: 10pt; flex-wrap: wrap;
+  margin: 8pt 0 6pt; font-size: 8pt; color: var(--tinta-suave);
+}
+.detalle-bar input {
+  font: inherit; font-size: 8pt; color: var(--tinta);
+  border: .75pt solid var(--linea); border-radius: 2pt; padding: 2pt 4pt; width: 96pt;
+}
+.detalle-nav { display: flex; gap: 4pt; }
+.detalle-nav button[disabled] { opacity: .4; cursor: default; }
+.detalle-marco { overflow-x: auto; }
+.detalle table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+.detalle th {
+  text-align: left; font-weight: 600; color: var(--tinta-suave);
+  border-bottom: .75pt solid var(--linea); padding: 3pt 4pt; white-space: nowrap;
+}
+.detalle td { padding: 2pt 4pt; border-bottom: .4pt solid var(--linea); vertical-align: top; }
+.detalle td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.grafica { position: relative; }
+.mes-hits {
+  position: absolute; top: 0; bottom: 0; display: flex; z-index: 5;
+}
+.mes-hit {
+  flex: 1 1 0; align-self: stretch; appearance: none; border: 0; padding: 0; margin: 0;
+  background: transparent; cursor: pointer; font: inherit;
+}
+.mes-hit:hover, .mes-hit:focus-visible { background: rgba(126, 34, 206, .08); outline: none; }
+.tarjeta-mes {
+  position: fixed; z-index: 40; min-width: 196px; max-width: 260px;
+  background: #fff; color: var(--tinta); border: 1px solid #e4e4e7; border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .14); padding: 10px 12px; font-size: 12px;
+  pointer-events: none;
+}
+.tarjeta-mes[hidden] { display: none; }
+.tarjeta-mes-cuando { margin: 0; font-weight: 600; font-size: 13px; }
+.tarjeta-mes-corte { margin: 2px 0 8px; color: #71717a; font-size: 11px; }
+.tarjeta-mes ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tarjeta-mes li { display: grid; grid-template-columns: 8px 1fr auto; gap: 6px; align-items: center; }
+.tarjeta-mes i { width: 8px; height: 8px; border-radius: 2px; }
+.tarjeta-mes i.linea { height: 2px; }
+.tarjeta-mes b { font-variant-numeric: tabular-nums; }
+.tarjeta-mes em { grid-column: 2 / -1; margin: -2px 0 0 14px; font-style: normal; color: #71717a; font-size: 11px; }
+.tarjeta-mes-vol { margin: 8px 0 0; padding-top: 6px; border-top: 1px solid #e4e4e7; display: flex; justify-content: space-between; gap: 12px; }
+.filtros-ayuda { flex-basis: 100%; margin: 0; font-size: 11px; color: #71717a; }
+
+.revision {
+  background: #14141a; color: #b9b9c2; font-size: 11px; padding: 10px 16px 14px;
+}
+.revision[hidden] { display: none; }
+.revision h4 { margin: 0 0 6px; font-size: 11px; color: #e8e8ea; }
+.revision ul { margin: 0; padding-left: 18px; }
+.revision li { margin: 2px 0; }
+.revision .mal { color: #ff8a95; }
+.revision .bien { color: #7ee2a8; }
+.revision .ojo { color: #ffd479; }
+.revision .titulo-grupo { list-style: none; margin: 8px 0 3px -18px;
+  font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+  color: #8a8a96; }
+.revision ul li.titulo-grupo:first-child { margin-top: 2px; }
+
+/* =================================== página ============================== */
+.pagina {
+  width: 864pt; margin: 18px auto 28px; background: #fff;
+  padding-bottom: 30pt;
+  box-shadow: 0 1px 3px rgba(23,23,23,.06), 0 1px 2px rgba(23,23,23,.04);
+}
+
+/* tapa */
+.tapa {
+  position: relative; height: 78pt; background: var(--morado);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.tapa::after {
+  content: ""; position: absolute; right: 26pt; top: 0; bottom: 0; width: 190pt;
+  background-image: radial-gradient(#fff 1.1px, transparent 1.2px);
+  background-size: 8px 6.4px; opacity: .5;
+  -webkit-mask-image: radial-gradient(ellipse 95pt 20pt at 52% 50%, #000 55%, transparent 100%);
+          mask-image: radial-gradient(ellipse 95pt 20pt at 52% 50%, #000 55%, transparent 100%);
+}
+.tapa .subrayado {
+  position: absolute; left: 24%; right: 24%; bottom: 13pt; height: .75pt;
+  background: rgba(255,255,255,.4);
+}
+/* Placa blanca detrás del logo. El sistema prohíbe expresamente poner el tile
+   morado sobre un campo morado —y la tapa lo es—, así que el logo va sobre una
+   placa en surface.canvas, uno de los tres fondos aprobados. El aire que queda
+   entre el borde de la placa y el logo es el clear space que pide el sistema:
+   como mínimo el diámetro del spark (a 42 pt de logo son ~3,2 pt; acá hay 5). */
+.marca {
+  position: absolute; left: 50%; transform: translateX(-216pt);
+  width: 52pt; height: 52pt; border-radius: 8pt; background: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.marca svg { display: block; width: 42pt; height: 42pt; }
+/* Montserrat solo acá: es el único texto del reporte por encima de 20px, que
+   es el umbral que fija el sistema. Debajo de eso manda Inter. */
+.titulo-area { margin: 0; color: #fff; font-size: 16pt; font-weight: 700;
+  font-family: Montserrat, system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: .04em; text-transform: uppercase; text-align: center; }
+.titulo-area small { display: block; font-size: 11pt; letter-spacing: 0;
+  font-weight: 400; text-transform: none; opacity: .92; margin-top: 2pt;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+.corte { padding: 7pt 12pt 0; font-size: 7.5pt; color: var(--tinta-suave); line-height: 1.6; }
+.corte b { display: block; font-weight: 400; }
+
+/* bandas de sección */
+.banda-1 {
+  margin: 12pt 0 15pt; min-height: 18pt; background: var(--morado); color: #fff;
+  text-align: center; font-size: 11pt; font-weight: 600; padding: 4pt 8pt;
+  text-transform: uppercase; letter-spacing: .05em; border-radius: 6pt;
+}
+.banda-2 {
+  margin: 18pt 0 13pt; background: var(--lavanda); color: var(--morado);
+  border: .75pt solid #E9D5FF; border-radius: 6pt;
+  text-align: center; font-size: 10.5pt; font-weight: 600; padding: 4.5pt 8pt;
+}
+
+/* ================================= indicador ============================= */
+.indicador { margin: 0 0 22pt; padding: 0 12pt; break-inside: avoid; }
+.franja {
+  margin: 0 -12pt 11pt; background: var(--franja); padding: 5pt 10pt;
+  border-radius: 6pt;
+  display: flex; align-items: center; justify-content: space-between; gap: 10pt;
+}
+.franja h3 { margin: 0; font-size: 10.5pt; font-weight: 600; }
+.franja .nota { font-size: 7pt; font-weight: 400; font-style: italic;
+  color: var(--tinta-suave); display: block; margin-top: 1pt; }
+
+/* La reja: datos a la izquierda, comentarios a la derecha.
+   El ancho de la columna de comentarios es parte del estándar. */
+.reja { display: grid; grid-template-columns: 1fr 208pt; gap: 12pt; align-items: start; }
+/* Este tablero no lleva la columna de comentarios del WBR: la gráfica usa el ancho. */
+.reja-datos { grid-template-columns: 1fr; }
+.franja .leyenda { flex-direction: row; flex-wrap: wrap; gap: 3pt 12pt; }
+
+.kpis { display: flex; flex-wrap: wrap; margin: 0 0 13pt; }
+.kpi {
+  border: .75pt solid var(--linea); border-right: 0; padding: 6.5pt 11pt 5.5pt;
+  min-width: 86pt; text-align: center; display: flex; flex-direction: column; gap: 1.5pt;
+}
+.kpi:first-child { border-top-left-radius: 6pt; border-bottom-left-radius: 6pt; }
+.kpi:last-child { border-right: .75pt solid var(--linea);
+  border-top-right-radius: 6pt; border-bottom-right-radius: 6pt; }
+.kpi b { font-size: 14pt; font-weight: 600; line-height: 1.15; }
+.kpi span { font-size: 7.5pt; color: var(--tinta-suave); }
+.kpi.pos b, .kpi.pos span { color: var(--verde); }
+.kpi.neg b, .kpi.neg span { color: var(--rojo); }
+.kpi.meta b, .kpi.meta span { color: var(--meta); }
+.kpi.aviso b, .kpi.aviso span { color: var(--naranja-txt); }
+.kpi.resalte { background: var(--resalte); }
+
+.graficas { display: grid; grid-template-columns: 1fr 1fr; gap: 22pt; }
+.graficas.una { grid-template-columns: 1fr; }
+
+/* ---------------------------------- sellos ------------------------------- */
+.sello {
+  flex: 0 0 auto; font-size: 9pt; font-weight: 600; letter-spacing: .02em;
+  padding: 3.5pt 10pt; border-radius: 999px; border: 1.5pt solid currentColor;
+  white-space: nowrap; text-decoration: none;
+}
+.sello.alerta { color: var(--rojo); }
+.sello.revisar { color: var(--naranja-txt); }
+.sello.validado {
+  color: #fff; background: var(--verde); border-color: #166534;
+  border-radius: 50%; width: 40pt; height: 40pt; font-size: 6pt;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  line-height: 1.1;
+}
+
+/* ------------------------------- comentarios ----------------------------- */
+.comentarios { padding-top: 3pt; display: flex; flex-direction: column; gap: 9pt; }
+.leyenda { display: flex; flex-direction: column; gap: 3pt; font-size: 8pt; }
+.leyenda span { display: flex; align-items: flex-start; gap: 4pt; line-height: 1.3; }
+.leyenda i { flex: 0 0 auto; width: 7.5pt; height: 7.5pt; margin-top: 1.5pt; }
+.leyenda i.linea { height: 2.5pt; margin-top: 4pt; }
+.comentario {
+  margin: 0; font-size: 8pt; line-height: 1.45; color: var(--tinta);
+  white-space: pre-line;
+}
+.comentario b { font-weight: 600; }
+.comentario.vacio {
+  color: var(--tinta-suave); font-style: italic;
+  border: .75pt solid var(--linea); border-radius: 6pt; padding: 7pt;
+  background: #FAFAFA;
+}
+
+/* --------------------------------- gráficas ------------------------------ */
+.grafica { min-width: 0; }
+.plot { position: relative; }
+.eje { position: absolute; top: 0; bottom: 0; width: 30pt; }
+.eje.izq { left: 0; }
+.eje.der { right: 0; }
+.tick {
+  position: absolute; font-size: 6.5pt; color: var(--tinta-suave); line-height: 1;
+  transform: translateY(50%);
+}
+.eje.izq .tick { right: 2pt; }
+.eje.der .tick { left: 2pt; }
+.lienzo {
+  position: relative; height: 100%;
+  border-bottom: .75pt solid var(--linea);
+}
+/* Guías horizontales en los ticks del eje izquierdo. Se piden desde el área
+   (`guias: true`). Van DETRÁS de las barras (los .seg son position:relative y
+   pintan encima), así que solo se ven donde la barra no llega: es justo la zona
+   donde una banda es demasiado delgada para llevar su número escrito. */
+.guias { position: absolute; inset: 0; }
+.guias span { position: absolute; left: 0; right: 0; height: 0;
+  border-top: .5pt solid var(--linea-fuerte); }
+.barras { display: flex; align-items: flex-end; gap: 3pt; height: 100%; }
+.ranura { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.pila { width: 100%; max-width: 34pt; height: 100%; position: relative;
+  display: flex; flex-direction: column; justify-content: flex-end; }
+.seg { width: 100%; position: relative; }
+/* Barras al 100%: cada segmento lleva su porcentaje adentro, como en las
+   gráficas de composición del tablero (inventario financiado, facturación). */
+.seg .pct {
+  position: absolute; inset: 0; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 6pt; line-height: 1; white-space: nowrap; color: #fff;
+}
+.seg .pct.sobre-claro { color: var(--tinta); }
+/* Pilas normales (no al 100%): el valor de cada banda va DENTRO, como en el
+   tablero de origen. Solo se imprime si la banda mide más que UMBRAL_BANDA;
+   el aire de 1pt evita que el 6pt toque el borde del segmento. */
+/* CARRIL IZQUIERDO. El valor de la banda se alinea a la izquierda, no al
+   centro: el carril derecho queda libre para la etiqueta de la línea, que en
+   esta gráfica pasa justo por las bandas de abajo (Gabi vale 0–6, o sea vive
+   pegada al eje). Centrar las dos cosas es lo que hace ilegible el tablero. */
+.seg .pct.banda { align-items: center; justify-content: flex-start; padding-left: 1.5pt; }
+/* Total de la pila en paneles densos (13 categorías): a 7pt "1.174" mide más
+   que la ranura y se pisa con el mes vecino; a 6pt cabe. */
+.etq.chica { font-size: 6pt; }
+/* El total va arriba de la barra, sobre blanco, pero la línea del eje derecho
+   puede cruzar justo por ahí (17-ago: la línea pasa por "1.092"). */
+.etq.total { text-shadow: 0 0 1.6pt #fff, 0 0 1.6pt #fff, .4pt .4pt 0 #fff, -.4pt -.4pt 0 #fff; }
+/* Etiqueta de una LÍNEA que cae dentro de la pila: con el valor de la banda
+   debajo, hace falta separarla del fondo. Halo blanco en vez de recuadro: deja
+   ver el color de la banda entre los dígitos y no abre un hueco en la pila. */
+/* CARRIL DERECHO: etiqueta de línea pegada al borde derecho de su barra. */
+.etq.derecha { transform: translateX(-100%); }
+.etq.sobre-pila {
+  text-shadow: 0 0 1.6pt #fff, 0 0 1.6pt #fff, .4pt .4pt 0 #fff, -.4pt -.4pt 0 #fff,
+               .4pt -.4pt 0 #fff, -.4pt .4pt 0 #fff;
+}
+/* Barras agrupadas: las series van lado a lado en vez de apilarse. Se usa cuando
+   las series no suman entre sí (un backlog y un flujo de salidas, por ejemplo:
+   apilarlos daría un total que no significa nada). */
+.pila.agrupada { flex-direction: row; align-items: flex-end; gap: 1.5pt; max-width: 40pt; }
+.pila.agrupada .seg { flex: 1 1 0; width: auto; }
+/* Grupos apilados: cada grupo es su propia pila y los grupos van lado a lado. Es
+   la forma de leer «de todo lo que tengo en cola, cuánto saqué»: el backlog
+   apilado —viejo y nuevo— junto a las salidas, no encima de ellas. Apilarlos
+   daría un total sin significado y separarlos en dos gráficas impediría
+   compararlos de un vistazo. */
+.pila.agrupada .subpila { flex: 1 1 0; height: 100%; position: relative;
+  display: flex; flex-direction: column; justify-content: flex-end; }
+.pila.agrupada .subpila .seg { width: 100%; flex: 0 0 auto; }
+/* Con dos o tres barras por categoría las etiquetas no caben de lado: van
+   verticales, como en el tablero de origen. */
+.etq.vertical { writing-mode: vertical-rl; transform: translateX(-50%) rotate(180deg); }
+/* Etiqueta que va DENTRO de su propia barra (el caso de las barras agrupadas).
+   Su tinta NO puede ser `var(--tinta)` como la del resto: encima de una barra
+   oscura no se lee. Sigue la misma regla de luminancia que `.seg .pct` —blanca
+   por omisión, oscura cuando la barra es clara—, decidida por `sobreClaro()`.
+
+   Se cambió el 2026-09-04: en Experiencia CO y MX la serie «Total respuestas» va
+   en `--cat-8` (#1D4ED8, azul profundo, luminancia 0,107) y su número salía en
+   tinta oscura encima. Medido: 2,68:1, por debajo del 4,5:1 que exige WCAG para
+   texto de 7 pt. Con la regla puesta sale blanco a 6,70:1. Le pasaba a cualquier
+   área que agrupara barras con un color oscuro. */
+.etq.en-barra { color: #fff; }
+.etq.en-barra.sobre-claro { color: var(--tinta); }
+.etq {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  font-size: 7pt; line-height: 1; white-space: nowrap; color: var(--tinta);
+}
+svg.capa { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 1; }
+/* El trazo va en el DOM después de las barras, así que cruzaba por encima de
+   los números (la línea partía el "1.092"). Los rótulos suben de capa. */
+.seg .pct { z-index: 3; }
+.pila > .etq { z-index: 3; }
+/* Los puntos de las líneas van en HTML, no como <circle> del SVG: el lienzo se
+   estira con preserveAspectRatio='none' y un círculo saldría ovalado. */
+.punto {
+  position: absolute; width: 3pt; height: 3pt; border-radius: 50%;
+  transform: translate(-50%, 50%);
+}
+.eje-x { display: flex; gap: 3pt; margin-top: 4.5pt; }
+.etiqueta {
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center;
+  font-size: 6.5pt; color: var(--tinta-suave); line-height: 1.3; text-align: center;
+}
+
+/* ---------------------------- tabla de cohortes -------------------------- */
+table.cohorte { border-collapse: collapse; font-size: 7.5pt; width: 100%; }
+table.cohorte th { font-weight: 600; text-align: center; padding: 3pt 4pt;
+  border-bottom: .75pt solid var(--linea); color: var(--tinta-suave); }
+table.cohorte td { padding: 3pt 4pt; text-align: center; color: var(--tinta); }
+table.cohorte td.et { text-align: left; color: var(--tinta); white-space: nowrap; }
+
+/* --------------------------------- vacíos -------------------------------- */
+.sin-datos { font-size: 9pt; color: var(--tinta-suave);
+  border: .75pt dashed var(--linea); padding: 10pt; margin: 0; }
+
+/* ============================ tablero de pantalla ======================== */
+.app { min-height: 100vh; background: #F3F4F6; }
+.cabecera {
+  position: sticky; top: 0; z-index: 25;
+  display: flex; align-items: center; height: 56px; padding: 0 24px;
+  background: #14121C;
+}
+.cabecera-marca {
+  width: 36px; height: 36px; border-radius: 8px; background: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.cabecera-marca svg { width: 28px; height: 28px; display: block; }
+.contenido { max-width: 1240px; margin: 0 auto; padding: 22px 24px 48px; }
+.encabezado { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.titulo-linea { display: flex; align-items: center; gap: 10px; }
+.aviso-espera { margin: 8px 0 4px; color: #71717a; font-size: 14px; line-height: 1.45; }
+.encabezado h1 {
+  margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; color: #171717;
+}
+.encabezado h1::before {
+  content: ""; display: inline-block; width: 4px; height: 22px; margin-right: 10px;
+  border-radius: 2px; background: #7E22CE; vertical-align: -2px;
+}
+.encabezado p { margin: 4px 0 0 14px; color: #71717a; font-size: 14px; }
+.actualizacion {
+  flex: 0 0 auto; background: #fff; border: 1px solid #E4E4E7; border-radius: 10px;
+  padding: 8px 12px; text-align: right; font-size: 12px; color: #71717a;
+}
+.actualizacion b { display: block; margin-top: 2px; color: #171717; font-size: 13px; font-weight: 600; }
+.vigencia { display: flex; align-items: center; gap: 8px; }
+.vigencia .btn-limpiar { height: 38px; white-space: nowrap; }
+.pestanas { display: flex; gap: 8px; margin: 16px 0; }
+.pestanas button {
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  color: #3f3f46; background: #fff; border: 1px solid #E4E4E7; border-radius: 999px;
+  padding: 8px 16px;
+}
+.pestanas button.activa { color: #fff; background: #7E22CE; border-color: #7E22CE; }
+.pestanas button:focus-visible { outline: 2px solid #7E22CE; outline-offset: 2px; }
+
+.filtros {
+  display: block; background: #fff; color: var(--tinta);
+  border: 1px solid #E4E4E7; border-radius: 12px; border-bottom: 1px solid #E4E4E7;
+  padding: 16px 18px 14px;
+  box-shadow: 0 1px 2px rgba(23, 23, 23, .04);
+}
+.filtros-cab { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.filtros-cab h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.filtros-cab p { margin: 2px 0 0; font-size: 12px; color: #71717a; }
+.btn-limpiar, .btn-descarga {
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border-radius: 8px; padding: 8px 12px;
+}
+.btn-limpiar { color: #3f3f46; background: #fff; border: 1px solid #D4D4D8; }
+.btn-limpiar:hover { border-color: #7E22CE; color: #7E22CE; }
+.btn-descarga { color: #fff; background: #7E22CE; border: 1px solid #7E22CE; }
+.btn-descarga:hover { background: #6B21A8; }
+.filtros-rejilla {
+  display: grid; grid-template-columns: 150px 1fr 1fr 1.15fr 1.3fr 1.2fr 1.3fr; gap: 12px 14px; align-items: end;
+}
+.filtro-fijo select, .filtro-btn, .filtro-fijo input[type="date"] {
+  width: 100%; min-width: 0; height: 36px; border-radius: 8px; padding: 0 10px; background: #fff;
+}
+.fase-pills { display: flex; gap: 6px; min-height: 36px; align-items: center; }
+.fase-pills button {
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: #3f3f46; background: #fff; border: 1px solid #D4D4D8; border-radius: 999px; padding: 6px 12px;
+}
+.fase-pills button.activa { color: #fff; background: #7E22CE; border-color: #7E22CE; }
+.filtro { min-width: 0; }
+.filtros-ayuda { margin: 10px 0 0; }
+
+.detalle-tarjeta {
+  margin-top: 16px; background: #fff; border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(23, 23, 23, .06); padding: 16px 18px 18px;
+}
+.detalle-cab { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.detalle-cab h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: 0; text-transform: none; }
+.detalle-cab p { margin: 2px 0 0; font-size: 12px; color: #71717a; }
+.detalle-tarjeta .detalle-bar { margin: 0 0 10px; font-size: 13px; gap: 10px; }
+.detalle-tarjeta .detalle-bar input {
+  font-size: 13px; width: 180px; padding: 7px 10px; border-radius: 8px; border: 1px solid #D4D4D8;
+}
+.detalle-tarjeta .detalle-nav button { border-radius: 8px; padding: 7px 10px; }
+.detalle-tarjeta .detalle-marco {
+  max-height: 480px; overflow: auto; border: 1px solid #E4E4E7; border-radius: 8px;
+}
+.detalle-tarjeta table { font-size: 13px; }
+.detalle-tarjeta th {
+  position: sticky; top: 0; background: #FAFAFA; font-size: 12px; padding: 8px 10px;
+}
+.detalle-tarjeta td { padding: 8px 10px; font-size: 13px; }
+@media screen and (max-width: 1100px) {
+  .filtros-rejilla { grid-template-columns: 1fr 1fr; }
+  .encabezado { flex-direction: column; }
+}
+
+@media screen {
+  .pagina { width: auto; margin: 16px 0 0; border-radius: 12px; }
+  .tapa { border-radius: 12px 12px 0 0; }
+}
+
+/* ------------------------------- impresión ------------------------------- */
+@page { size: 864pt auto; margin: 0; }
+@media print {
+  body { background: #fff; }
+  .cabecera, .encabezado, .pestanas, .filtros, .revision, .detalle-nav, .detalle-acciones, .mes-hits, .tarjeta-mes { display: none; }
+  .app, .contenido { background: #fff; max-width: none; padding: 0; }
+  .pagina { margin: 0; box-shadow: none; width: 864pt; border-radius: 0; }
+  .detalle-tarjeta { box-shadow: none; }
+}
+/* Conveniencia de PANTALLA angosta, y solo de pantalla. Sin `screen and` la regla
+   también aplicaba al imprimir: Chrome headless mide el ancho contra la VENTANA
+   (800 px por omisión, no los 1152 px = 864 pt de la página), la condición daba
+   verdadera y el bloque quedaba con 12 px de margen dentro de una página de su
+   mismo ancho — o sea corrido 12 px a la derecha y recortado 12 px por ese lado.
+   Medido el 2026-08-31 sobre el PDF de sellers/inmo-co renderizado a 100 dpi:
+   antes la banda de la tapa iba de x=12 a x=1199; después, de 0 a 1199. El PDF de
+   operaciones ya salía 0/0, o sea el estándar es borde a borde. */
+@media screen and (max-width: 900px) { body { overflow-x: auto; } .pagina { margin: 12px; } }

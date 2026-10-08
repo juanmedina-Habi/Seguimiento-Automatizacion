@@ -1,0 +1,228 @@
+<script>
+/* Tabla de nid, búsqueda y descarga. */
+let estadoVista = "automatizacion";
+const estadoDetalle = {
+  automatizacion: { nid: "", pagina: 0 },
+  polynator: { nid: "", pagina: 0 },
+};
+function detalleActivo() { return estadoDetalle[estadoVista]; }
+function enAppsScript() {
+  return !!(window.google && google.script && google.script.run);
+}
+let detalleToken = 0;
+function filtrosServidor() {
+  const c = window.CELDAS;
+  const e = estadoFiltro;
+  const lista = (set, cat) => [...set].map(i => cat[i]);
+  return {
+    tipo: e.tipo,
+    pais: e.pais == null ? "" : c.pais[e.pais],
+    fases: lista(e.fase, c.fase),
+    areas: lista(e.area, c.area),
+    zgs: lista(e.zg, c.zg),
+    zms: lista(e.zm, c.zm),
+    nid: detalleActivo().nid,
+    pagina: detalleActivo().pagina,
+    corte: document.getElementById("corte")?.value || window.CORTE_WBR,
+  };
+}
+function vistaActiva() {
+  const titulo = estadoVista === "polynator" ? "Seguimiento Polynator" : "Seguimiento Automatización";
+  return {
+    titulo,
+    secciones: (REPORTE.secciones || []).filter(s => s.banda === titulo),
+  };
+}
+const TAM_DETALLE = 50;
+function celdaCsv(v) {
+  const s = String(v ?? "");
+  return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function pasaDetalle(f) {
+  const e = estadoFiltro;
+  const corte = (typeof REPORTE !== "undefined" && REPORTE && REPORTE.corte) || window.CORTE_WBR;
+  if (corte && window.DETALLE && window.DETALLE.dias[f[1]] > corte) return false;
+  if (e.tipo === "Capacity" && f[10] !== 1) return false;
+  if (e.pais != null && f[3] !== e.pais) return false;
+  if (e.fase.size && !e.fase.has(f[4])) return false;
+  if (e.area.size && !e.area.has(f[5])) return false;
+  if (e.zg.size && !e.zg.has(f[6])) return false;
+  if (e.zm.size && !e.zm.has(f[7])) return false;
+  return true;
+}
+function recolectarDetalle() {
+  const nidq = detalleActivo().nid;
+  const desde = detalleActivo().pagina * TAM_DETALLE;
+  const muestra = [];
+  let total = 0;
+  for (const f of window.DETALLE.filas) {
+    if (!pasaDetalle(f)) continue;
+    if (nidq && String(f[0]).indexOf(nidq) === -1) continue;
+    if (total >= desde && muestra.length < TAM_DETALLE) muestra.push(f);
+    total++;
+  }
+  return { muestra, total };
+}
+function htmlTablaDetalle() {
+  if (!window.DETALLE && !enAppsScript()) {
+    return `<section class="detalle detalle-tarjeta"><h2>Tabla detalle</h2><p class="sin-datos">La tabla se llena al abrir el tablero.</p></section>`;
+  }
+  const nota = estadoVista === "polynator"
+    ? "Nid del recorte, con uso de Polynator. La más reciente primero."
+    : "Nid del recorte, con método de precio. La más reciente primero.";
+  return `<section class="detalle detalle-tarjeta">
+    <div class="detalle-cab">
+      <div>
+        <h2>Tabla detalle</h2>
+        <p>${nota}</p>
+      </div>
+      <button type="button" class="btn-descarga" id="det-descarga">Descargar CSV</button>
+    </div>
+    <div class="detalle-bar">
+      <label>Nid <input id="f-nid" type="search" inputmode="numeric" placeholder="Buscar nid" value="${escapeFiltro(detalleActivo().nid)}"></label>
+      <span id="detalle-cuenta"></span>
+      <span class="detalle-nav">
+        <button type="button" class="btn-limpiar" id="det-prev">Anterior</button>
+        <button type="button" class="btn-limpiar" id="det-next">Siguiente</button>
+      </span>
+    </div>
+    <div class="detalle-marco"><table>
+      <thead><tr>
+        <th>Nid</th><th>Fecha</th><th>Ciudad</th><th>Zona grande</th><th>Área</th>
+        <th>Fase</th><th>Polynator</th><th>Método</th>
+      </tr></thead>
+      <tbody id="detalle-cuerpo"></tbody>
+    </table></div>
+  </section>`;
+}
+function pintarDetalleRemoto() {
+  const cuerpo = document.getElementById("detalle-cuerpo");
+  const cuenta = document.getElementById("detalle-cuenta");
+  if (!cuerpo) return;
+  const token = ++detalleToken;
+  cuerpo.innerHTML = `<tr><td colspan="8">Cargando nid…</td></tr>`;
+  google.script.run.withSuccessHandler(res => {
+    if (token !== detalleToken) return;
+    const muestra = res.filas || [];
+    const total = res.total || 0;
+    const ultima = Math.max(0, Math.ceil(total / TAM_DETALLE) - 1);
+    if (detalleActivo().pagina > ultima) {
+      detalleActivo().pagina = ultima;
+      pintarDetalleRemoto();
+      return;
+    }
+    cuerpo.innerHTML = muestra.length ? muestra.map(f => {
+      const celdas = [f.nid, f.fecha, f.ciudad, f.zona_grande, f.area, f.fase, f.polynator, f.metodo];
+      return `<tr>${celdas.map((v, i) => `<td${i < 2 ? ' class="num"' : ""}>${escapeFiltro(v)}</td>`).join("")}</tr>`;
+    }).join("") : `<tr><td colspan="8">No hay nid con estos filtros.</td></tr>`;
+    const desde = total ? detalleActivo().pagina * TAM_DETALLE + 1 : 0;
+    const hasta = detalleActivo().pagina * TAM_DETALLE + muestra.length;
+    if (cuenta) cuenta.textContent = total
+      ? `${NF.entero.format(desde)}–${NF.entero.format(hasta)} de ${NF.entero.format(total)}`
+      : "0 nid.";
+    const prev = document.getElementById("det-prev");
+    const next = document.getElementById("det-next");
+    if (prev) prev.disabled = detalleActivo().pagina <= 0;
+    if (next) next.disabled = detalleActivo().pagina >= ultima;
+  }).withFailureHandler(err => {
+    if (token !== detalleToken) return;
+    cuerpo.innerHTML = `<tr><td colspan="8">${escapeFiltro(err.message || "No se pudo cargar la tabla")}</td></tr>`;
+  }).paginaDetalle(filtrosServidor());
+}
+function pintarDetalle() {
+  const cuerpo = document.getElementById("detalle-cuerpo");
+  const cuenta = document.getElementById("detalle-cuenta");
+  if (!cuerpo) return;
+  if (window.DETALLE) {
+    pintarDetalleLocal();
+    return;
+  }
+  if (enAppsScript()) { pintarDetalleRemoto(); return; }
+}
+function pintarDetalleLocal() {
+  const cuerpo = document.getElementById("detalle-cuerpo");
+  const cuenta = document.getElementById("detalle-cuenta");
+  if (!cuerpo || !window.DETALLE) return;
+  let { muestra, total } = recolectarDetalle();
+  const ultima = Math.max(0, Math.ceil(total / TAM_DETALLE) - 1);
+  if (detalleActivo().pagina > ultima) {
+    detalleActivo().pagina = ultima;
+    ({ muestra, total } = recolectarDetalle());
+  }
+  const c = window.CELDAS;
+  const d = window.DETALLE;
+  cuerpo.innerHTML = muestra.length ? muestra.map(f => {
+    const [y, m, dia] = d.dias[f[1]].split("-");
+    const celdas = [
+      f[0],
+      `${+dia}/${+m}/${y}`,
+      d.ciudad[f[2]],
+      c.zg[f[6]],
+      c.area[f[5]],
+      rotuloFiltro(c.fase[f[4]]),
+      c.poly[f[9]],
+      c.way[f[8]],
+    ];
+    return `<tr>${celdas.map((v, i) => `<td${i < 2 ? ' class="num"' : ""}>${escapeFiltro(v)}</td>`).join("")}</tr>`;
+  }).join("") : `<tr><td colspan="8">No hay nid con estos filtros.</td></tr>`;
+  const desde = total ? detalleActivo().pagina * TAM_DETALLE + 1 : 0;
+  const hasta = detalleActivo().pagina * TAM_DETALLE + muestra.length;
+  cuenta.textContent = total
+    ? `${NF.entero.format(desde)}–${NF.entero.format(hasta)} de ${NF.entero.format(total)}`
+    : "0 nid.";
+  const prev = document.getElementById("det-prev");
+  const next = document.getElementById("det-next");
+  if (prev) prev.disabled = detalleActivo().pagina <= 0;
+  if (next) next.disabled = detalleActivo().pagina >= ultima;
+}
+function bajarCsv(texto, nombre) {
+  const blob = new Blob(["\uFEFF" + texto], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = nombre;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function descargarDetalle() {
+  if (!window.DETALLE || !window.CELDAS) return;
+  const c = window.CELDAS;
+  const d = window.DETALLE;
+  const nidq = detalleActivo().nid;
+  const lineas = ["Nid;Fecha;Ciudad;Zona grande;Área;Fase;Polynator;Método"];
+  for (const f of d.filas) {
+    if (!pasaDetalle(f)) continue;
+    if (nidq && String(f[0]).indexOf(nidq) === -1) continue;
+    if (lineas.length > TOPE_CSV_LOCAL) {
+      window.alert("Hay más de " + NF.entero.format(TOPE_CSV_LOCAL) + " nid en este recorte. Acota país, fase o zona: la descarga llega hasta " + NF.entero.format(TOPE_CSV_LOCAL) + ".");
+      return;
+    }
+    const [y, m, dia] = d.dias[f[1]].split("-");
+    lineas.push([
+      f[0], `${+dia}/${+m}/${y}`, d.ciudad[f[2]], c.zg[f[6]], c.area[f[5]],
+      rotuloFiltro(c.fase[f[4]]), c.poly[f[9]], c.way[f[8]],
+    ].map(celdaCsv).join(";"));
+  }
+  const nombre = (estadoVista === "polynator" ? "seguimiento-polynator" : "seguimiento-automatizacion") + `-${REPORTE.corte}.csv`;
+  bajarCsv(lineas.join("\n"), nombre);
+}
+function engancharDetalle() {
+  const nid = document.getElementById("f-nid");
+  if (!nid) return;
+  nid.addEventListener("input", () => {
+    detalleActivo().nid = nid.value.trim();
+    detalleActivo().pagina = 0;
+    pintarDetalle();
+  });
+  document.getElementById("det-prev").addEventListener("click", () => {
+    if (detalleActivo().pagina <= 0) return;
+    detalleActivo().pagina--;
+    pintarDetalle();
+  });
+  document.getElementById("det-next").addEventListener("click", () => {
+    detalleActivo().pagina++;
+    pintarDetalle();
+  });
+  document.getElementById("det-descarga").addEventListener("click", descargarDetalle);
+}
+</script>

@@ -1,0 +1,936 @@
+<script>
+/* Dibuja las barras y la línea. No consulta BigQuery. */
+function hexDe(color) {
+  if (_HEX.has(color)) return _HEX.get(color);
+  let h = String(color).trim();
+  const m = /^var\((--[\w-]+)\)$/.exec(h);
+  if (m) h = getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim();
+  h = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(h) ? h : "";
+  _HEX.set(color, h);
+  return h;
+}
+function luminancia(hex) {
+  let s = hex.slice(1);
+  if (s.length === 3) s = [...s].map(c => c + c).join("");
+  const lin = v => (v /= 255) <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4);
+  return .2126 * lin(parseInt(s.slice(0, 2), 16))
+       + .7152 * lin(parseInt(s.slice(2, 4), 16))
+       + .0722 * lin(parseInt(s.slice(4, 6), 16));
+}
+function sobreClaro(color) {
+  const h = hexDe(color);
+  return h ? luminancia(h) > .179 : SERIES_CLARAS.has(color);
+}
+
+const NF = {
+  entero:     new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }),
+  miles:      new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }),
+  decimal:    new Intl.NumberFormat("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  porcentaje: new Intl.NumberFormat("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  // Exactamente dos decimales, no cuatro cifras significativas. Con las cifras
+  // significativas el mismo recuadro cambiaba de precisión según la magnitud
+  // —«-0,4406%» al lado de «+300,0%»— y en una fila de KPIs eso se lee ragged.
+  // Dos decimales fijos alinean la coma y no prometen precisión que la cifra no
+  // tiene. Decidido para todas las áreas el 2026-09-07.
+  variacion:  new Intl.NumberFormat("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  moneda:     new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }),
+  escalada:   new Intl.NumberFormat("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  decimal_1:  new Intl.NumberFormat("es-CO", { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+  porcentaje_1: new Intl.NumberFormat("es-CO", { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+  porcentaje_0: new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }),
+};
+
+function fmt(v, formato = "entero") {
+  if (v === null || v === undefined || v === "") return "—";
+  if (formato === "texto" || typeof v === "string") return String(v);
+  switch (formato) {
+    case "porcentaje": return NF.porcentaje.format(v) + "%";
+    case "porcentaje_1": return NF.porcentaje_1.format(v) + "%";
+    case "porcentaje_0": return NF.porcentaje_0.format(v) + "%";
+    case "variacion":  return (v > 0 ? "+" : "") + NF.variacion.format(v) + "%";
+    // Puntos porcentuales. Cuando el NIVEL de un indicador ya es un porcentaje, su
+    // WoW y su MoM no son una variación relativa: son una diferencia en pp. Salían
+    // con «%» y se leían como otra cosa. Propuesto desde sellers el 2026-09-01 con
+    // seis indicadores entre Inmo CO e Inmo MX, que lo tenían anotado como pendiente
+    // en su CONFIG antes que inventarse un formato propio.
+    case "variacion_pp": return (v > 0 ? "+" : "") + NF.variacion.format(v) + "pp";
+    case "moneda":     return "$" + NF.moneda.format(v);
+    // Montos grandes con la escala FIJA y declarada por el área, no automática:
+    // en el mismo reporte el tablero muestra radicaciones en B y desembolsos en M
+    // aunque las dos magnitudes darían B. La escala es una decisión editorial.
+    case "moneda_m":   return "$" + NF.escalada.format(v / 1e6) + "M";
+    case "moneda_b":   return "$" + NF.escalada.format(v / 1e9) + "B";
+    case "decimal":    return NF.decimal.format(v);
+    case "decimal_1":  return NF.decimal_1.format(v);
+    default:           return NF.entero.format(v);
+  }
+}
+
+const etqSemana = iso => { const [a,m,d] = iso.split("-"); return [`${+d} ${MES[+m-1]}`, a]; };
+const etqMes    = iso => { const [a,m]   = iso.split("-"); return [MES[+m-1], a]; };
+
+/* --------------------------------------------------------------- escala Y
+   Elige el paso redondo que da el tope más ajustado con 4 a 7 intervalos.
+   Con máximo 117 devuelve 0–120 de 20 en 20, igual que el eje de Tableau. */
+/* EL EJE PUEDE BAJAR DEL CERO, y hasta el 2026-09-04 no podía.
+   `minimo` estaba en la firma desde siempre y NO SE USABA: la función devolvía
+   `piso: 0` fijo. Con un solo eje eso da igual —una barra nace en cero—, pero
+   cuando una línea comparte lienzo con barras y su valor es NEGATIVO, la línea
+   se salía del área de trazado por abajo y no se veía.
+
+   Se vio en Experiencia CO y MX: la línea de NPS vale entre −100 y 100, las
+   barras cuentan encuestas desde 0, y como los dos ceros quedaban pegados en el
+   mismo borde inferior, cada semana con NPS negativo dibujaba el punto fuera de
+   la gráfica. En Inmobiliaria CO eran cuatro de ocho semanas.
+
+   Compatible hacia atrás: quien llame `escala(max)` sigue recibiendo `piso: 0`
+   y las mismas marcas de antes. El piso solo se mueve si se le pasa un mínimo
+   negativo. */
+function escala(maximo, minimo = 0) {
+  const min = Math.min(0, minimo);
+  if (!isFinite(maximo) || (maximo <= 0 && min === 0)) return { tope: 1, piso: 0, ticks: [0, 1] };
+  let mejor = null;
+  // Hasta 1e12: sin los cinco últimos, un eje en miles de millones no encontraba
+  // ningún paso con 4 a 7 intervalos, caía al respaldo de abajo y dibujaba SOLO
+  // dos marcas —el cero y el máximo—. La de arriba quedaba suelta y se leía como
+  // una etiqueta flotando sin barra. Le pasaba a cualquier gráfica en pesos.
+  for (const mag of [1e-3, 1e-2, .1, 1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12]) {
+    for (const f of [1, 2, 2.5, 5]) {
+      const paso = f * mag;
+      const tope = Math.ceil(maximo / paso) * paso;
+      // El piso se redondea HACIA ABAJO, para que el mínimo quepa entero, y el
+      // cero siempre cae en una marca porque tope y piso son múltiplos del paso.
+      const piso = Math.floor(min / paso) * paso;
+      const n = Math.round((tope - piso) / paso);
+      if (n < 4 || n > 7) continue;
+      if (!mejor || (tope - piso) < (mejor.tope - mejor.piso)) mejor = { paso, tope, piso };
+    }
+  }
+  if (!mejor) mejor = { paso: (maximo - min) || 1, tope: maximo, piso: min };
+  const ticks = [];
+  for (let t = mejor.piso; t <= mejor.tope + 1e-9; t += mejor.paso) ticks.push(+t.toFixed(6));
+  return { tope: mejor.tope, piso: mejor.piso, ticks };
+}
+
+/* Escala con el TOPE IMPUESTO desde el CONFIG (`topeEjeDerecho`). `escala` elige
+   el tope a partir del máximo de la serie; acá el tope ya está dado y lo único
+   que se busca es el paso que caiga redondo entre 4 y 7 intervalos.
+
+   Para qué: cuando la línea vale mucho menos que las barras, su eje propio la
+   dibuja pegada al techo —la rotación de remodelaciones-co llegaba al 86% del
+   lienzo con un tope automático de 50— y sus rótulos aterrizan justo entre los
+   topes de las pilas. Con el tope en 100 la misma línea baja al 43% y la franja
+   de arriba queda libre para los totales. */
+function escalaTope(tope, piso = 0) {
+  const rango = tope - piso;
+  if (!(rango > 0)) return { tope: 1, piso: 0, ticks: [0, 1] };
+  let paso = null;
+  for (const mag of [1e-3, 1e-2, .1, 1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8]) {
+    for (const f of [1, 2, 2.5, 5]) {
+      const p = f * mag, k = rango / p;
+      if (Math.abs(k - Math.round(k)) > 1e-9 || k < 4 || k > 7) continue;
+      if (paso == null || p < paso) paso = p;
+    }
+  }
+  if (paso == null) paso = rango / 5;
+  const ticks = [];
+  for (let t = piso; t <= tope + 1e-9; t += paso) ticks.push(+t.toFixed(6));
+  return { tope, piso, ticks };
+}
+
+/* ------------------------------------------------------------- gráfica */
+function grafica(g, etiquetador, unaSola) {
+  if (!g || !g.series || !g.series.length) return "";
+  const alto = g.alto || 128;
+  const n = (g.categorias || []).length;
+  const formato = g.formato || "entero";
+  const barras = g.series.filter(s => (s.tipo || "barra") === "barra");
+  const lineas = g.series.filter(s => s.tipo === "linea");
+  const conEtq = g.etiquetas !== false;
+  /* ROTULADO DENSO — opt-in, apagado por omisión.
+     Prende de una vez el paquete de rotulado nuevo (valor dentro de cada banda,
+     total ARRIBA de la barra, colocación de las etiquetas de línea por hueco
+     libre). Es UNA bandera y no tres porque las tres piezas se sostienen entre
+     sí: el total puede subir porque el interior de la pila ya está escrito, y
+     las etiquetas de línea pueden buscar hueco porque saben dónde están los dos.
+     Apagada, esta función emite exactamente el mismo HTML que antes: las otras
+     seis áreas del repo no cambian ni un pixel hasta que lo pidan. */
+  const denso = !!g.rotuladoDenso && conEtq;
+  /* `rotulosTotal`: el rotulado denso trae DOS cosas —el valor dentro de cada
+     banda y el TOTAL encima de la barra—. En una pila de muchas series con línea
+     encima, el total pelea con la etiqueta de la línea en la misma ranura y salen
+     pares encabalgados. Apagarlo conserva el resto del denso. Default: encendido. */
+  const conTotal = denso && g.rotulosTotal !== false;
+  /* Cuántos puntos de línea se rotulan. Es una decisión DECLARADA por el área,
+     no un residuo de lo que quepa: "todos" en un panel de 8 ranuras, "extremos"
+     (primero, último y máximo de cada serie) donde hay 13. Antes esto lo
+     resolvía el colocador borrando en silencio lo que no cabía — y borrar un
+     número sin decirlo es peor que un solape, porque el lector no puede saber
+     que falta. */
+  const modoLinea = g.rotulosLinea || "todos";
+
+  // Formato por serie, con el de la gráfica de respaldo. Hace falta porque una
+  // misma gráfica lleva barras en conteo y una línea en pesos, cada una con su eje.
+  const fmtSerie = se => se.formato || formato;
+  const formatoBarras = barras.length ? fmtSerie(barras[0]) : formato;
+  const formatoLineas = lineas.length ? fmtSerie(lineas[0]) : formato;
+
+  // Agrupadas: cada barra ocupa su propio alto. Apiladas: el alto es la suma.
+  // Al 100%: la barra siempre llega al tope y lo que se lee es el reparto.
+  const agrupadas = !!g.agrupadas && barras.length > 1;
+  const cien = !!g.porcentaje100 && barras.length > 0;
+  // Grupos: las series que comparten `grupo` se apilan entre sí y los grupos van
+  // lado a lado. Sin `grupo` declarado nada cambia.
+  const conGrupos = barras.some(se => se.grupo) && barras.length > 1 && !cien;
+  const grupos = conGrupos ? [...new Set(barras.map(se => se.grupo || "—"))] : [];
+  const seriesDe = gr => barras.filter(se => (se.grupo || "—") === gr);
+  const sumaGrupo = (gr, i) => seriesDe(gr).reduce((s, se) => s + (se.valores[i] ?? 0), 0);
+  const totales = Array.from({ length: n }, (_, i) =>
+    conGrupos   ? Math.max(0, ...grupos.map(gr => sumaGrupo(gr, i)))
+    : agrupadas ? Math.max(0, ...barras.map(se => se.valores[i] ?? 0))
+                : barras.reduce((s, se) => s + (se.valores[i] ?? 0), 0));
+  const valsLinea = lineas.flatMap(s => s.valores.filter(v => v != null));
+  const maxLinea = Math.max(0, ...valsLinea);
+  // El MÍNIMO de la línea, que antes no se calculaba. Sin él, una línea que baja
+  // del cero —un NPS, una variación, un margen negativo— se dibujaba fuera del
+  // área de trazado. `Math.min(0, …)` mantiene el cero como piso cuando la línea
+  // es toda positiva, o sea que el caso de siempre no cambia.
+  const minLinea = Math.min(0, ...valsLinea);
+
+  /* Dos cosas conviven acá y son independientes: de dónde saca su escala la línea
+     y hasta dónde baja el piso.
+
+     `ejeCompartido`: la línea se escala contra el eje IZQUIERDO y no se dibuja un
+     segundo eje. Por omisión, cuando hay barras Y líneas la línea recibe su propio
+     eje a la derecha, que es lo correcto cuando las dos magnitudes no son comparables
+     (un stock y un %). Cuando la línea es un SUBCONJUNTO de las barras —en
+     sellers/inmo-mx, los leads asignados directo a Inmo salen del mismo total— el eje
+     propio la dibuja pegada al techo, cruzando los topes de las pilas, y compararla
+     contra la misma escala es lo único que significa algo.
+     ⚠ No confundir con `ejeDerecho: false`, que solo esconde el ROTULADO del segundo
+     eje pero mantiene la segunda escala: deja la línea en otra escala y ya sin forma
+     de saber cuál.
+
+     `minLinea`: el piso puede bajar del cero. Le toca al eje donde VIVA la línea —el
+     izquierdo si es compartido o si no hay barras, el derecho en el resto—. Una barra
+     nace en cero y no necesita piso negativo; una línea sí. */
+  const compartido = !!g.ejeCompartido && barras.length > 0 && lineas.length > 0;
+  const izq = cien ? { tope: 1, piso: 0, ticks: [0, .2, .4, .6, .8, 1] }
+                   : barras.length
+                     ? escala(Math.max(0, ...totales, compartido ? maxLinea : 0),
+                              compartido ? minLinea : 0)
+                     : escala(maxLinea, minLinea);
+  let der = (!compartido && barras.length && lineas.length) ? escala(maxLinea, minLinea) : null;
+  /* Tope fijo del eje derecho, declarado por el área. Se ignora si la línea se
+     sale de él: un eje que corta la serie miente, y prefiero el eje automático
+     feo antes que un trazo recortado sin aviso. */
+  if (der && g.topeEjeDerecho != null && maxLinea <= g.topeEjeDerecho)
+    der = escalaTope(g.topeEjeDerecho, der.piso);
+  const escLinea = der || izq;
+  /* Posición de un valor de LÍNEA dentro de su eje, de 0 a 1.
+     Era `v / escLinea.tope`, que solo es correcto si el eje arranca en cero. Con
+     un piso negativo hay que normalizar contra el RANGO, o el punto se dibuja
+     donde no va — y si el valor es negativo, fuera del lienzo. */
+  const rangoLinea = escLinea.tope - escLinea.piso;
+  const nrmLinea = v => rangoLinea ? (v - escLinea.piso) / rangoLinea : 0;
+  // La línea puede escalarse contra su propio eje sin ROTULARLO. El tablero de
+  // origen no lo dibuja —los valores ya van en las etiquetas— y con la columna
+  // de comentarios al lado su rótulo queda suelto contra el borde.
+  const rotularDer = der && g.ejeDerecho !== false;
+
+  // El ancho del panel hace falta ANTES de armar las barras: es lo que decide
+  // si el total de una categoría cabe al lado del de la vecina.
+  const padIzq = 30, padDer = rotularDer ? 32 : 0;
+
+  /* ------------------------------------------- colocación de las etiquetas
+     Todo en pt sobre el alto real del lienzo, no a ojo. */
+  // Caja REAL del texto: Chrome mide el ancho de la fuente (ascendente +
+   // descendente ≈ 1,30 em en Inter), no el line-height. Medido con Range sobre
+   // los rótulos ya pintados; con 7 pt de caja quedaban solapes de 0,5 pt.
+  const ETQ_ALTO = c => c * 1.30;
+  const ETQ_AIRE = 2;        // aire entre el tope de la barra y su total
+  const UMBRAL_BANDA = 8.2;  // pt de banda que exige un valor de 6 pt (7,8 de caja real + aire)
+  /* Ancho útil del panel, en pt. Con DOS paneles: (864 − 24 de padding − 208 de
+     comentarios − 12 − 22 de gap) / 2 = 299. Con UNO (`.graficas.una`, que se
+     activa sola cuando a un indicador le falta una periodicidad —un corte
+     temprano, por ejemplo—) el panel se estira a los 620 pt completos. Estaba
+     cableado en 299 y ahí el colocador veía choques que no existían. */
+  const ANCHO_PANEL = g.anchoPanel || (unaSola ? 620 : 299);
+  // 13 categorías: "1.174" a 7 pt mide 19 pt y la ranura da 18,5. A 6 pt cabe.
+  const totalChico = n >= 10;
+  const cuerpoTotal = totalChico ? 6 : 7;
+  const ranura = (ANCHO_PANEL - padIzq - padDer - 3 * (n - 1)) / n + 3;  // centro a centro
+  // Ancho estimado del texto en pt: Inter tabular-nums da ~.60em por dígito y
+  // ~.30em por separador de miles.
+  // .65 em por dígito y .32 por separador de miles: calibrado midiendo los
+  // rótulos ya pintados con Range (con .60 el estimado se quedaba 1,6 pt corto
+  // y "132" y "0" se tocaban en feb).
+  const anchoTxt = (s, cuerpo) =>
+    [...String(s)].reduce((a, c) => a + (/\d/.test(c) ? .65 : .32), 0) * cuerpo;
+  const txtTotal = i => fmt(totales[i], formatoBarras);
+  const posTotal = Array.from({ length: n }, (_, i) => (totales[i] / izq.tope) * alto + ETQ_AIRE);
+  // ¿Cabe el total? Se decide de la categoría MÁS RECIENTE hacia atrás —la
+  // última es la que se lee— y se salta la que se montaría sobre la ya puesta.
+  // Antes se alternaba la altura (i % 2) y el panel mensual quedaba en escalera.
+  const rotularTotal = new Array(n).fill(false);
+  if (conTotal && !cien && !agrupadas && barras.length) {
+    /* Se decide de la categoría MÁS RECIENTE hacia atrás —la última es la que se
+       lee—. Antes se alternaba la altura (i % 2) y el panel mensual quedaba en
+       escalera; la primera versión de esta regla OMITÍA el total que no cupiera
+       al lado de su vecina, y en el panel de 13 meses eso se comía justo el mes
+       cerrado contra el que compara el WBR (jul-2026 = 1.008, pegado a
+       ago = 1.174: 38,8 pt de texto en 15,5 pt de ranura, no caben lado a lado
+       ni a 6 pt). Omitir el número del mes de comparación es peor que un
+       escalón, así que el que no cabe en ANCHO se EMPUJA hacia arriba, un
+       renglón por encima de su vecina. Se permiten hasta DOS niveles de empuje;
+       pasado eso el panel está pidiendo menos categorías, no más acrobacia, y
+       ahí sí se omite (y se cuenta en la consola). */
+    const NIVEL = ETQ_ALTO(cuerpoTotal) + 1;
+    let ult = null, omitidos = 0;
+    for (let i = n - 1; i >= 0; i--) {
+      if (!(totales[i] > 0)) continue;
+      const w = anchoTxt(txtTotal(i), cuerpoTotal);
+      if (!ult) { rotularTotal[i] = true; ult = { i, w, nivel: 0 }; continue; }
+      if ((ult.i - i) * ranura >= (w + ult.w) / 2 + 1.5) {
+        rotularTotal[i] = true; ult = { i, w, nivel: 0 };
+      } else if (ult.nivel < 2) {
+        const nivel = ult.nivel + 1;
+        rotularTotal[i] = true;
+        posTotal[i] += NIVEL * nivel;
+        ult = { i, w, nivel };
+      } else { omitidos++; }
+    }
+    if (omitidos) console.info(`[wbr] ${omitidos} total(es) sin espacio ni empuje disponible`);
+  }
+  // El valor DENTRO de cada banda, como el tablero. Se puede apagar por gráfica.
+  const dentro = denso && !cien && !agrupadas && barras.length > 1 && g.valoresDentro !== false;
+
+  /* Geometría de cada pila en pt: dónde queda el CENTRO de cada valor rotulado
+     adentro y dónde quedan las COSTURAS entre bandas. Las costuras son el hueco
+     natural de la pila —el valor va centrado en su banda—, así que es ahí donde
+     puede caber la etiqueta de una línea sin pisar un número. */
+  const pilaGeo = Array.from({ length: n }, (_, i) => {
+    const costuras = [], centros = [];
+    let acum = 0;                       // las barras se apilan en el orden de la lista
+    for (const se of barras) {
+      const v = se.valores[i] ?? 0;
+      if (!v) continue;
+      const hpt = (v / izq.tope) * alto;
+      if (dentro && hpt >= UMBRAL_BANDA)
+        centros.push({ y: acum + hpt / 2, w: anchoTxt(fmt(v, fmtSerie(se)), 6) });
+      acum += hpt;
+      costuras.push(acum);
+    }
+    return { costuras, centros };
+  });
+
+  // `pct` en vez de `t / esc.tope`: con un piso negativo el cero ya no está en el
+  // borde de abajo, así que la marca se sitúa dentro del RANGO, no sobre el tope.
+  // Con piso 0 —el caso de siempre— da exactamente el mismo número que antes.
+  const pct = (esc, t) => {
+    const rango = esc.tope - esc.piso;
+    return (rango ? (t - esc.piso) / rango : 0) * 100;
+  };
+  const tickHtml = (esc, fmtEje) => esc.ticks
+    .map(t => `<span class="tick" style="bottom:${pct(esc, t)}%">${fmt(t, fmtEje)}</span>`)
+    .join("");
+  const guiasHtml = g.guias ? `<div class="guias" aria-hidden="true">${
+    izq.ticks.filter(t => t > 0).map(t =>
+      `<span style="bottom:${pct(izq, t)}%"></span>`).join("")}</div>` : "";
+
+  // Camino de GRUPOS APILADOS. Va aparte del apilado simple y del agrupado, que
+  // llevan meses en producción y no se tocan.
+  const cuerpoGrupos = conGrupos ? `<div class="barras">${
+    Array.from({ length: n }, (_, i) => {
+      const columnas = grupos.map(gr => {
+        const suma = sumaGrupo(gr, i);
+        const segs = seriesDe(gr).map(se => {
+          const v = se.valores[i];
+          if (v == null || v === 0) return "";
+          return `<div class="seg" style="height:${(v / izq.tope) * 100}%;background:${se.color}"
+                       title="${se.nombre}: ${fmt(v, fmtSerie(se))}"></div>`;
+        }).reverse();
+        // El total va encima de SU columna, no de la ranura entera.
+        const etq = (conEtq && suma > 0)
+          ? `<span class="etq" style="bottom:${(suma / izq.tope) * 100}%;margin-bottom:1.5pt">${fmt(suma, formatoBarras)}</span>`
+          : "";
+        return `<div class="subpila">${segs.join("")}${etq}</div>`;
+      });
+      return `<div class="ranura"><div class="pila agrupada">${columnas.join("")}</div></div>`;
+    }).join("")
+  }</div>` : "";
+
+  const cuerpoBarras = conGrupos ? cuerpoGrupos : barras.length ? `<div class="barras">${
+    Array.from({ length: n }, (_, i) => {
+      const segs = barras.map(se => {
+        const v = se.valores[i];
+        if (v == null || v === 0) return agrupadas ? `<div class="seg"></div>` : "";
+        if (cien) {
+          // El reparto, no la magnitud. Una categoría sin total no pinta nada.
+          if (!totales[i]) return "";
+          const parte = v / totales[i];
+          // Por debajo del 4% el porcentaje no cabe dentro del segmento.
+          const rotulo = conEtq && parte >= .04
+            ? `<span class="pct${sobreClaro(se.color) ? " sobre-claro" : ""}">${fmt(parte * 100, "porcentaje_1")}</span>`
+            : "";
+          return `<div class="seg" style="height:${parte * 100}%;background:${se.color}"
+                       title="${se.nombre}: ${fmt(v, fmtSerie(se))}">${rotulo}</div>`;
+        }
+        // Valor dentro de la banda, con reja por ALTO REAL: una banda de menos
+        // de UMBRAL_BANDA pt no puede contener un texto de 6 pt sin morderlo,
+        // así que ahí no se rotula. En el panel mensual eso apaga solo las
+        // bandas mínimas y los meses chicos; en el semanal deja las grandes.
+        const altoSeg = (v / izq.tope) * alto;
+        const txtSeg = fmt(v, fmtSerie(se));
+        // Reja de ANCHO además de la de alto: el texto va pegado a la izquierda
+        // y con nowrap, así que un formato largo (moneda_m, porcentaje) se
+        // saldría de la banda hacia la barra vecina en vez de recortarse.
+        const rotDentro = dentro && altoSeg >= UMBRAL_BANDA
+          && anchoTxt(txtSeg, 6) + 3 <= ranura
+          // El halo va del color de la propia banda: donde la línea cruza el
+          // número, el trazo queda por detrás y el dígito se lee limpio, sin
+          // abrir un recuadro blanco dentro de la pila.
+          ? `<span class="pct banda${sobreClaro(se.color) ? " sobre-claro" : ""}"
+                   style="text-shadow:0 0 1.4pt ${se.color},0 0 1.4pt ${se.color},.35pt .35pt 0 ${se.color},-.35pt -.35pt 0 ${se.color},.35pt -.35pt 0 ${se.color},-.35pt .35pt 0 ${se.color}">${txtSeg}</span>`
+          : "";
+        return `<div class="seg" style="height:${(v / izq.tope) * 100}%;background:${se.color}"
+                     title="${se.nombre}: ${fmt(v, fmtSerie(se))}">${rotDentro}</div>`;
+      });
+      // Apiladas: una sola etiqueta con el total. Agrupadas: sumar no significa
+      // nada, así que cada barra lleva la suya.
+      // Con 10+ categorías las etiquetas vecinas no caben en una sola altura:
+      // se alternan, igual que las de las líneas.
+      let etq = "";
+      if (cien) {
+        etq = "";   // el total de una barra al 100% es siempre 100%: no se rotula
+      } else if (conEtq && agrupadas) {
+        /* Cada barra lleva su número, escrito en vertical para que quepa en una
+           ranura estrecha. Dos decisiones por barra, y las dos se tomaban mal:
+
+           DÓNDE. El número iba siempre a `bottom:0`, o sea dentro de la barra.
+           En una barra corta el texto vertical es más largo que la barra y se
+           desbordaba hacia el papel. Ahora se mide: si el texto cabe en el alto
+           de la barra va adentro; si no, va ENCIMA, que es donde se lee.
+
+           CON QUÉ TINTA. Iba con `var(--tinta)` fija. Adentro de una barra
+           oscura eso es ilegible —lo que se vio en «Total respuestas» de
+           Experiencia, azul profundo con número negro—. Adentro la tinta la
+           decide la luminancia de la barra; encima, sobre papel blanco, va la
+           tinta normal con halo blanco, igual que `.etq.total`. */
+        etq = barras.map((se, k) => {
+          const v = se.valores[i];
+          if (v == null || v === 0) return "";
+          const centro = ((k + 0.5) / barras.length) * 100;
+          const txt = fmt(v, fmtSerie(se));
+          const altoBarra = (v / izq.tope) * alto;
+          // Lo que ocupa el texto VERTICAL a lo alto es su ancho en horizontal.
+          const largoTxt = anchoTxt(txt, 7) + 3;
+          if (altoBarra >= largoTxt) {
+            const clase = `etq vertical en-barra${sobreClaro(se.color) ? " sobre-claro" : ""}`;
+            return `<span class="${clase}" style="left:${centro}%;bottom:0;margin-bottom:1.5pt">${txt}</span>`;
+          }
+          return `<span class="etq vertical total" style="left:${centro}%;bottom:${(v / izq.tope) * 100}%;margin-bottom:${ETQ_AIRE}pt">${txt}</span>`;
+        }).join("");
+      } else if (!denso && conEtq && totales[i] > 0) {
+        // RUTA VIEJA, para quien no prenda `rotuladoDenso`.
+        //
+        // La alternancia evita que dos etiquetas VECINAS se toquen cuando la
+        // ranura se estrecha. Pero solo hace falta si la etiqueta es ANCHA:
+        // `$69,06B` no cabe en una ranura de doce meses y hay que escalonarla;
+        // `128` sí cabe, y escalonarla deja unas barras con el número flotando
+        // más arriba que otras sin razón — se veía en Cupo Aval, donde marzo y
+        // mayo quedaban descolgados.
+        const anchoEtq = Math.max(...totales.map(v => fmt(v, formatoBarras).length));
+        const salto = (n >= 10 && anchoEtq >= 5 && i % 2 === 0) ? 8 : 1.5;
+        etq = lineas.length
+          ? `<span class="etq" style="bottom:0;margin-bottom:${salto}pt">${fmt(totales[i], formatoBarras)}</span>`
+          : `<span class="etq" style="bottom:${(totales[i] / izq.tope) * 100}%;margin-bottom:${salto}pt">${fmt(totales[i], formatoBarras)}</span>`;
+      } else if (rotularTotal[i]) {
+        // El total va ARRIBA de la barra SIEMPRE, también con línea encima. A la
+        // base ya no puede ir: ahí están los valores de las bandas, la línea
+        // Gabi (que vale 0–6, o sea vive pegada al eje) y el rótulo del eje X.
+        // La colisión con la etiqueta de la línea —el motivo original de bajarlo—
+        // la resuelve ahora el loop de empuje, que trata el total como posición
+        // ocupada y sube la etiqueta de la línea.
+        etq = `<span class="etq total${totalChico ? " chica" : ""}" style="bottom:${(totales[i] / izq.tope) * 100}%;margin-bottom:${ETQ_AIRE}pt">${txtTotal(i)}</span>`;
+      }
+      const orden = agrupadas ? segs : segs.reverse();
+      return `<div class="ranura"><div class="pila${agrupadas ? " agrupada" : ""}">${orden.join("")}${etq}</div></div>`;
+    }).join("")
+  }</div>` : "";
+
+  // líneas + puntos + etiquetas
+  let capa = "";
+  if (lineas.length) {
+    const x = i => ((i + 0.5) / n) * 100;
+    const y = v => 100 - nrmLinea(v) * 100;
+    const trazos = lineas.map(se => {
+      const pts = se.valores.map((v, i) => v == null ? null : [x(i), y(v)]).filter(Boolean);
+      if (!pts.length) return "";
+      const d = pts.map((p, i) => (i ? "L" : "M") + p[0] + " " + p[1]).join(" ");
+      return `<path d="${d}" fill="none" stroke="${se.color}" stroke-width="1.1"
+                    vector-effect="non-scaling-stroke" stroke-linejoin="round" />`;
+    }).join("");
+    capa = `<svg class="capa" viewBox="0 0 100 100" preserveAspectRatio="none">${trazos}</svg>`;
+
+    capa += lineas.map(se => se.valores.map((v, i) => v == null ? "" :
+      `<span class="punto" style="left:${x(i)}%;bottom:${100 - y(v)}%;background:${se.color}"></span>`
+    ).join("")).join("");
+
+    if (conEtq && !denso) {
+      /* EL LADO LO DECIDE EL VÉRTICE. En cada punto la línea deja dos costados y
+         el rótulo va en el ABIERTO: arriba en un pico, abajo en un valle. Antes
+         todas iban al mismo lado —arriba, o abajo cuando hay grupos porque el
+         total ocupa la franja de encima— y en una serie que sube y baja los
+         números caían sobre el propio trazo y sobre el vecino.
+
+         En un tramo monótono los dos ángulos valen casi lo mismo, así que manda
+         el lado por omisión y el desempate lo hace la prueba de choque: se
+         intenta el lado preferido, luego el contrario, y solo si ninguno cabe se
+         empuja a lo largo del preferido. El colocador NO borra nunca.
+
+         Cuerpo de 6 pt en paneles de 10+ categorías, el mismo criterio que los
+         totales: en el panel de 13 meses un rótulo de 7 pt no cabe en la ranura. */
+      const cuerpoEtq = totalChico ? 6 : 7;
+      const CAJA = ETQ_ALTO(cuerpoEtq);
+      const SEP = CAJA + 1.5;   // la caja real más el aire que pide el halo
+      const OFF = 3;            // aire entre el punto y su rótulo
+      const TOPE_EMPUJE = 26;   // más allá de esto la etiqueta miente sobre su punto
+      const ladoDefecto = conGrupos ? -1 : +1;
+      const ladoDe = (vals, i) => {
+        let a = null, b = null;
+        for (let k = i - 1; k >= 0; k--) if (vals[k] != null) { a = vals[k]; break; }
+        for (let k = i + 1; k < vals.length; k++) if (vals[k] != null) { b = vals[k]; break; }
+        const v = vals[i];
+        if (a == null && b == null) return ladoDefecto;
+        if (a == null) return v >= b ? +1 : -1;
+        if (b == null) return v >= a ? +1 : -1;
+        if (v >= a && v >= b) return +1;   // pico  → el ángulo abierto está arriba
+        if (v <= a && v <= b) return -1;   // valle → abajo
+        return ladoDefecto;                // tramo monótono: los dos lados igual
+      };
+      // Las posiciones se comparten entre las líneas: dos series distintas pueden
+      // caer a la misma altura en la misma categoría.
+      const puestas = Array.from({ length: n }, () => []);
+      /* SEMBRADO: lo que ya está escrito antes de que llegue la primera etiqueta
+         de línea. Con GRUPOS APILADOS cada columna lleva el total de cada grupo
+         ENCIMA de su barra, y el colocador no lo sabía: solo se cuidaba de otras
+         etiquetas de línea, así que un rótulo podía aterrizar sobre el total de su
+         propia columna. Pasó al bajar remodelaciones-co de 13 a 10 meses: el «34»
+         de ago-26 quedó a 4,5 pt del total «121».
+         Los demás repartos no hacen falta. En la pila simple con línea el total va
+         a `bottom:0`, pegado al eje, lejos de la línea; y en las agrupadas el
+         número va VERTICAL dentro de su barra, con otra geometría. */
+      if (conGrupos) {
+        for (let i = 0; i < n; i++)
+          for (const gr of grupos) {
+            const suma = sumaGrupo(gr, i);
+            if (suma > 0) puestas[i].push({
+              pos: (suma / izq.tope) * alto + 1.5,
+              w: anchoTxt(fmt(suma, formatoBarras), cuerpoTotal),
+            });
+          }
+      }
+      capa += lineas.map(se => se.valores.map((v, i) => {
+        if (v == null) return "";
+        const txt = fmt(v, fmtSerie(se));
+        const w = anchoTxt(txt, cuerpoEtq);
+        const y = nrmLinea(v) * alto;
+        // `.etq` se ancla por su borde INFERIOR, así que el rótulo de abajo hay
+        // que bajarlo además el alto de su propia caja.
+        const borde = ld => ld > 0 ? y + OFF : y - OFF - CAJA;
+        /* Solo estorban las vecinas cuyos textos NO caben de lado en el espacio
+           que las separa. Las etiquetas van centradas en su ranura, así que entre
+           dos columnas a distancia `d` hay `d` pt y cada texto ocupa la mitad del
+           suyo hacia cada lado. */
+        const choca = (pos) => {
+          for (let k = Math.max(0, i - 2); k <= Math.min(n - 1, i + 2); k++) {
+            const dx = Math.abs(k - i) * ranura;
+            for (const q of puestas[k]) {
+              if (k !== i && (q.w + w) / 2 + 3 <= dx) continue;
+              if (Math.abs(pos - q.pos) < SEP) return true;
+            }
+          }
+          return false;
+        };
+        const lado = ladoDe(se.valores, i);
+        let pos = borde(lado);
+        if (choca(pos)) {
+          const otro = borde(-lado);
+          if (!choca(otro) && otro >= 0) pos = otro;
+          else {
+            const paso = lado > 0 ? SEP : -SEP;
+            let p = pos;
+            for (let t = 0; t < 4 && choca(p); t++) p += paso;
+            pos = (!choca(p) && p >= 0 && Math.abs(p - borde(lado)) <= TOPE_EMPUJE) ? p : borde(lado);
+          }
+        }
+        if (pos < 0) pos = borde(+1);   // nunca por debajo del piso del lienzo
+        puestas[i].push({ pos, w });
+        /* Halo: el rótulo puede quedar cruzado por el trazo de su propia línea,
+           que entra y sale desde las categorías vecinas. Sobre blanco no se ve,
+           así que encenderlo siempre no cambia nada donde no estorba. */
+        return `<span class="etq sobre-pila${totalChico ? " chica" : ""}"
+                      style="left:${x(i)}%;bottom:${pos}pt;color:${se.color}">${txt}</span>`;
+      }).join("")).join("");
+    }
+
+    if (denso) {
+      /* Colocación por HUECO LIBRE, no por empuje ciego. Con los valores dentro
+         de las bandas el interior de la pila ya está escrito, así que una
+         etiqueta de línea se prueba en este orden:
+           1. sobre su punto (lo normal),
+           2. en la costura de banda más cercana —el hueco de la pila—,
+           3. corrida media ranura al canalón entre barras, donde no hay números
+              porque los valores van centrados en cada pila.
+         Si ninguna cabe cerca de su punto se dibuja EN SU PUNTO y se acepta el
+         roce: un solape se ve y el lector pregunta; un número que falta es
+         invisiblemente falso. El colocador no borra nunca. Lo que sí decide el
+         área es CUÁNTOS puntos se rotulan (`rotulosLinea`), y eso queda
+         declarado en el CONFIG, a la vista. */
+      // +1,5 pt sobre la caja del texto: es el aire que necesita el halo de
+      //  1,6 pt para no ensuciar al vecino. Medido con Range sobre la página:
+      //  con +0,5 quedaban pares a 0,8 pt de aire, que el halo se come.
+      const SEP_ETQ = ETQ_ALTO(cuerpoTotal) + 1.5;
+      // El valor de la banda va CENTRADO en su banda y la etiqueta de línea se
+      // ancla por abajo (bottom). Sin corregir el medio texto, un hueco de 8 pt
+      // contra el centro de la banda dejaba solo 4 pt reales y los dígitos se
+      // tocaban ("132" y el "0" de feb).
+      const MEDIO = ETQ_ALTO(cuerpoTotal) / 2;
+      /* Deriva máxima respecto del punto propio. Tiene que ser MAYOR que
+         SEP_ETQ: si no, dos puntos que caen a la misma altura —las dos líneas
+         valen 3 y 4 en la misma semana, o los dos arrancan en 0— no pueden
+         separarse ni un renglón y el segundo se dibuja encima del primero.
+         Con 10 pt contra un SEP_ETQ de 10,6 eso pasaba en 4 de las 8 semanas. */
+      const DERIVA = SEP_ETQ + 2.5;
+      /* La etiqueta de la línea va en el CARRIL DERECHO de su barra y el valor
+         de la banda en el izquierdo, así que casi nunca se estorban: solo
+         cuando los dos textos no caben de lado en la ranura (el panel mensual
+         da 18,5 pt y "209" + "379" no entran). Ese caso se resuelve como los
+         demás, buscando el hueco vertical más cercano al punto: las costuras de
+         la pila y los bordes de lo que ya está escrito. Si nada cae a menos de
+         DERIVA del punto, no se rotula: una etiqueta a 30 pt de su punto miente
+         sobre el valor, y era eso lo que llenaba de ceros flotantes el mensual.
+         Las posiciones ocupadas se comparten entre las dos líneas (Gabi y NO
+         Gabi caían a la misma altura en la misma categoría). */
+      const puestas = Array.from({ length: n }, () => []);
+      /* ¿Se estorban de lado? Depende de CÓMO esté anclado el otro texto:
+         · valor de banda — pegado al borde IZQUIERDO de la pila,
+         · total — CENTRADO sobre la barra,
+         · etiqueta de línea — pegada al borde DERECHO de la pila.
+         Con la ranura de 18,5 pt del panel mensual un rótulo de 2 dígitos en el
+         carril derecho ya cruza el centro, así que el total sí lo estorba. */
+      // +4,5 pt de aire: 3 de separación mínima entre dos textos y 1,5 del halo
+      // que llevan los dos (sin ese margen "132" y "0" quedaban pegados en feb).
+      const estorbaBanda = (wb, w) => wb + w + 6.5 > ranura;
+      // +3 pt: con 1,5 el "0" de ago-25 quedaba pegado al "36" del total (los
+      // dos llevan halo, que se come el aire nominal).
+      const estorbaTotal = (wt, w) => w + wt / 2 + 3 > ranura / 2;
+      const libre = (i, pos, base, w) => {
+        if (Math.abs(pos - base) > DERIVA) return false;
+        if (rotularTotal[i] && estorbaTotal(anchoTxt(txtTotal(i), cuerpoTotal), w)
+            && Math.abs(pos - posTotal[i]) < SEP_ETQ) return false;
+        for (const c of pilaGeo[i].centros)
+          // Verificado contra la página ya pintada: el centro teórico de cada
+          // banda y el que mide el navegador coinciden a menos de 0,01 pt (los
+          // 25 valores del panel mensual), así que la prueba no necesita margen
+          // por redondeo: basta SEP_ETQ, que ya lleva el halo.
+          if (estorbaBanda(c.w, w) && Math.abs(pos + MEDIO - c.y) < SEP_ETQ) return false;
+        for (const q of puestas[i]) if (Math.abs(pos - q.pos) < SEP_ETQ) return false;
+        // Vecinas: solo la de al lado y solo si los dos textos NO caben de lado
+        // en la ranura. Antes se revisaban dos categorías atrás a lo ancho de
+        // toda la gráfica, y con las etiquetas ya en el carril derecho eso
+        // descartaba rótulos que estaban a 60 pt de distancia (el "50" del
+        // 17-ago se caía por el "49" del 3-ago).
+        for (const k of [i - 1, i + 1]) {
+          if (k < 0 || k >= n) continue;
+          for (const q of puestas[k])
+            /* ⚠ El aire entre dos etiquetas de líneas VECINAS es
+               `ranura − ancho_de_la_de_la_derecha`, no `ranura − (w1 + w2)`: la
+               etiqueta está anclada por su borde DERECHO al borde derecho de su
+               ranura (`.etq.derecha { transform: translateX(-100%) }`), así que
+               crece hacia la izquierda y la de la izquierda termina donde empieza
+               su propia ranura. Sumar los dos anchos inventaba choques donde había
+               9,5 pt de aire libre (ranura 18,5 con dos rótulos de 9 pt) y empujaba
+               la etiqueta un SEP_ETQ entero hacia arriba. Medido en el DOM el
+               1-sep-2026 sobre sellers/inmo-mx. */
+            if ((k < i ? w : q.w) + 3 > ranura && Math.abs(pos - q.pos) < SEP_ETQ) return false;
+        }
+        return true;
+      };
+      /* ¿Qué puntos de esta serie llevan rótulo? En "extremos": el MÁXIMO y el
+         ÚLTIMO. Los dos que cuentan la historia —en el panel mensual el pico de
+         "NO Gabi" ES la gráfica, y en la versión anterior se quedaba sin número—
+         y de paso se van los siete ceros que la línea Gabi dibujaba de ago-25 a
+         feb-26, que además se leían como si rotularan la barra.
+         El PRIMERO no entra a propósito: en un panel de 13 meses es el borde
+         izquierdo de una ventana móvil (cambia de mes a mes y no dice nada), y
+         geométricamente es el peor sitio de la gráfica: la barra más baja del
+         panel deja al total, a Gabi y a NO Gabi los tres pegados al eje, y con
+         una ranura de 18,5 pt un rótulo más ahí solo cabe mintiendo sobre su
+         altura. Se lee por altura, contra el eje derecho y las guías. */
+      const puntosDe = se => {
+        const idx = se.valores.map((v, i) => v == null ? -1 : i).filter(i => i >= 0);
+        if (modoLinea !== "extremos" || idx.length <= 2) return new Set(idx);
+        let max = idx[0];
+        for (const i of idx) if (se.valores[i] > se.valores[max]) max = i;
+        return new Set([idx[idx.length - 1], max]);
+      };
+      let alaBase = 0;   // cuántas etiquetas cayeron al respaldo (se cuenta, no se esconde)
+      /* Orden de colocación: COLUMNA por columna y, dentro de la columna, del
+         valor más BAJO al más alto. Antes se recorría serie por serie, y cuando
+         dos puntos caían a la misma altura la que se empujaba era la de la serie
+         declarada después —que podía ser la de valor menor—: quedaba el 3 por
+         encima del 4 y el rótulo mentía sobre el orden de las dos líneas. */
+      const trabajos = [];
+      for (const se of lineas) {
+        const rotula = puntosDe(se);
+        se.valores.forEach((v, i) => { if (v != null && rotula.has(i)) trabajos.push({ se, i, v }); });
+      }
+      trabajos.sort((a, b) => (a.i - b.i) || (a.v - b.v));
+      capa += trabajos.map(({ se, i, v }) => {
+        {
+          const txt = fmt(v, fmtSerie(se));
+          // Mismo cuerpo que el total: en el panel mensual una etiqueta de 7 pt
+          // al lado de un total de 6 pt se ve más grande que el dato principal.
+          const w = anchoTxt(txt, cuerpoTotal);
+          const base = nrmLinea(v) * alto + 3;
+          /* BARRIDO FINO alrededor del punto propio: pasos de 0,5 pt hasta
+             DERIVA, arriba y abajo. Antes la lista de candidatos era discreta
+             (las costuras de la pila y un renglón por encima de lo ya escrito) y
+             dejaba fuera huecos de 4 pt que sí existían: el "22" de jun-2026
+             caía al respaldo teniendo sitio libre 0,8 pt más arriba.
+             Primero SU altura —la que no miente— y a igualdad de desvío, arriba
+             antes que abajo. */
+          const opciones = [];
+          /* ⚠ ORDEN DEL BARRIDO: primero TODO hacia arriba, y solo después hacia
+             abajo. Antes se intercalaba por distancia, así que una etiqueta con
+             sitio arriba Y abajo se iba al de abajo si quedaba más cerca, y
+             terminaba DEBAJO de su punto: apuntando al valor equivocado, sin que
+             el lector tenga forma de notarlo.
+             ⚠ Abajo NO se puede eliminar, y se intentó: probando solo hacia
+             arriba, las etiquetas sin hueco caen al RESPALDO —que dibuja en el
+             punto y ACEPTA EL ROCE— y en sellers/inmo-mx pasaron de 3 a 17.
+             Medido con el aviso de consola de este mismo colocador. Una posición
+             abajo sigue siendo mejor que un solape.
+             ⚠ Lo que este reorden logra, con honestidad: quita el caso GRATUITO
+             —irse abajo teniendo sitio arriba— pero no los casos donde arriba no
+             hay nada libre. En la página donde se midió produce las mismas
+             posiciones que el orden viejo. Es una garantía, no una mejora medida;
+             el arreglo que sí mueve etiquetas es el de la prueba de choque entre
+             vecinas, más arriba. */
+          for (let d = 0; d <= DERIVA + 1e-6; d += .5) opciones.push(base + d);
+          for (let d = .5; d <= DERIVA + 1e-6; d += .5)
+            if (base - d >= 0) opciones.push(base - d);
+          // RESPALDO: si ningún hueco sirve, la etiqueta va a su punto igual y se
+          // acepta el roce. El colocador NO borra nunca.
+          let pos = opciones.find(o => libre(i, o, base, w));
+          if (pos == null) { pos = base; alaBase++; }
+          puestas[i].push({ pos, w });
+          // Dentro de la pila hace falta halo (la banda es de color); por encima
+          // del tope de la barra el fondo ya es blanco.
+          /* El halo va SIEMPRE, no solo dentro de la pila. Adentro es obvio (la
+             banda es de color), pero por encima del tope de la barra también hace
+             falta: lo que cruza el texto ahí es el TRAZO DE LA PROPIA LÍNEA, que
+             entra y sale del rótulo desde las categorías vecinas. Sobre fondo
+             blanco un halo blanco no se ve, así que encenderlo siempre no cambia
+             nada donde no estorba. */
+          return `<span class="etq derecha sobre-pila${totalChico ? " chica" : ""}"
+                        style="left:${x(i)}%;margin-left:${(ranura / 2 - 1.5).toFixed(1)}pt;bottom:${pos}pt;color:${se.color}">${txt}</span>`;
+        }
+      }).join("");
+      // Queda a la vista en la consola: si el respaldo se dispara mucho, el área
+      // tiene que bajar a `rotulosLinea:"extremos"`, no el motor esconder datos.
+      if (alaBase && typeof console !== "undefined")
+        console.info(`[wbr] ${alaBase} etiqueta(s) de línea al respaldo (n=${n})`);
+    }
+  }
+
+  const ejeX = (g.categorias || []).map(c =>
+    `<div class="etiqueta"><span>${c[0] ?? ""}</span><span>${c[1] ?? ""}</span></div>`).join("");
+
+  // Las etiquetas de la línea sobresalen del lienzo por arriba. Sin este aire
+  // se montan sobre los KPIs cuando la serie toca el tope del eje.
+  const aire = lineas.length && conEtq ? 16 : 0;
+  const hits = (g.categorias || []).map((cat, i) => {
+    const punto = {
+      mes: mesLargo(cat),
+      series: g.series.map(se => ({
+        nombre: se.nombre,
+        color: se.color,
+        tipo: se.tipo || "barra",
+        formato: se.formato || (se.tipo === "linea" ? formatoLineas : formatoBarras),
+        valor: se.valores[i],
+      })),
+    };
+    return `<button type="button" class="mes-hit" data-punto="${escapeFiltro(JSON.stringify(punto))}" aria-label="${escapeFiltro(punto.mes)}"></button>`;
+  }).join("");
+  return `<div class="grafica">
+    <div class="plot" style="height:${alto}pt;margin-top:${aire}pt;padding-left:${padIzq}pt;padding-right:${padDer}pt">
+      <div class="eje izq" aria-hidden="true">${tickHtml(izq, cien ? "decimal_1" : (barras.length ? formatoBarras : formatoLineas))}</div>
+      ${rotularDer ? `<div class="eje der" aria-hidden="true">${tickHtml(der, formatoLineas)}</div>` : ""}
+      <div class="lienzo">${guiasHtml}${cuerpoBarras}${capa}</div>
+    </div>
+    <div class="eje-x" style="padding-left:${padIzq}pt;padding-right:${padDer}pt">${ejeX}</div>
+    <div class="mes-hits" style="left:${padIzq}pt;right:${padDer}pt">${hits}</div>
+  </div>`;
+}
+
+function mesLargo(cat) {
+  const i = MES.indexOf(String(cat?.[0] || ""));
+  const anio = cat?.[1] || "";
+  if (i < 0) return [cat?.[0], anio].filter(Boolean).join(" ");
+  return anio ? `${MES_LARGO[i]} de ${anio}` : MES_LARGO[i];
+}
+
+/* -------------------------------------------------------------- cohortes */
+function tabla(t) {
+  const celda = v => {
+    if (v == null || v === "") return "<td></td>";
+    const num = parseFloat(String(v).replace("%", "").replace(",", "."));
+    if (isNaN(num)) return `<td class="et">${v}</td>`;
+    const a = Math.min(Math.max(num / 100, 0), 1);
+    return `<td style="background:rgba(168,85,247,${(a * .72).toFixed(2)});
+                       color:${a > .55 ? "#fff" : "var(--tinta)"}">${v}</td>`;
+  };
+  return `<table class="cohorte">
+    <thead><tr>${t.encabezados.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+    <tbody>${t.filas.map(f =>
+      `<tr><td class="et">${f[0]}</td>${f.slice(1).map(celda).join("")}</tr>`).join("")}</tbody>
+  </table>`;
+}
+
+/* ------------------------------------------------------------- indicador */
+function selloHtml(s) {
+  if (!s || !s.estado) return "";
+  const txt = s.estado === "validado" ? "VALIDADO"
+            : s.estado === "alerta" ? "ALERTA ESTRATEGIA" : "REVISAR ESTRATEGIA";
+  const cont = s.estado === "validado" ? "VALIDADO"
+             : txt + (s.valor != null ? `  ·  ${s.valor}` : "");
+  return s.link
+    ? `<a class="sello ${s.estado}" href="${s.link}">${cont}</a>`
+    : `<span class="sello ${s.estado}">${cont}</span>`;
+}
+
+function leyendaHtml(ind) {
+  let items = ind.leyenda;
+  if (!items) {
+    const vistas = new Map();
+    for (const g of [ind.semanal, ind.mensual]) {
+      for (const s of (g?.series || [])) {
+        if (s.nombre && !vistas.has(s.nombre)) vistas.set(s.nombre, s);
+      }
+    }
+    // El orden manda desde CONFIG, no desde los datos. Sin esto la leyenda salía
+    // en el orden de la SEMANAL y después lo que solo aparece en la MENSUAL: en
+    // Cupo Aval eso ponía los estados 18 y 19 —los únicos con dato reciente—
+    // delante del 6, y la lista quedaba 18, 19, 6, 8, 9, 10, 11.
+    if (ind.ordenSeries) {
+      const rango = nm => { const i = ind.ordenSeries.indexOf(nm); return i < 0 ? 1e9 : i; };
+      const ordenadas = [...vistas.entries()].sort((a, b) => rango(a[0]) - rango(b[0]));
+      vistas.clear();
+      for (const [k, v] of ordenadas) vistas.set(k, v);
+    }
+    // Una sola serie sin apilar no necesita leyenda.
+    items = vistas.size > 1
+      ? [...vistas.values()].map(s => ({ nombre: s.nombre, color: s.color, tipo: s.tipo }))
+      : [];
+  }
+  if (!items.length) return "";
+  return `<div class="leyenda">${items.map(l =>
+    `<span><i class="${l.tipo === "linea" ? "linea" : ""}" style="background:${l.color}"></i>${l.nombre}</span>`
+  ).join("")}</div>`;
+}
+
+/* `menosEsMejor` — para los indicadores donde SUBIR es la mala noticia.
+   Una rotación se mide en DÍAS: si sube, el inventario se demoró más. Sin esta
+   bandera la plantilla pintaba de verde cualquier variación positiva, así que una
+   rotación que empeora salía en verde y una que mejora en rojo.
+
+   Lo declara el indicador con `menosEsMejor: true` en su CONFIG; por omisión sigue
+   mandando la convención de siempre (subir es bueno).
+
+   OJO al reescribir esto con variables tipo `bueno`/`malo`: en el fork de
+   Operaciones ya se hizo y quedaron cruzadas, con el crecimiento en rojo en TODO
+   el reporte. La comparación directa es más fea y no se puede leer al revés. */
+function kpiHtml(k, menosEsMejor) {
+  const formato = k.formato || (typeof k.valor === "string" ? "texto" : "entero");
+  let tono = k.tono || "";
+  if (!tono && formato === "variacion" && typeof k.valor === "number") {
+    // La pregunta es una sola: ¿subir es la buena noticia?
+    tono = k.valor === 0 ? ""
+         : (k.valor > 0) !== !!menosEsMejor ? "pos" : "neg";
+  }
+  return `<div class="kpi ${tono} ${k.resalte ? "resalte" : ""}">
+    <b>${fmt(k.valor, formato)}</b><span>${k.etiqueta}</span></div>`;
+}
+
+function indicadorHtml(ind, corte) {
+  const sem = recortar(ind.semanal, corte, 8, "semanal");
+  /* Cuántos meses entran al panel. Trece por omisión —el año corrido más el mes
+     equivalente del año pasado, que es contra lo que compara el negocio—, pero el
+     área puede pedir menos con `mesesPanel`.
+
+     Para qué: el ancho del panel es fijo (299 pt), así que menos meses es más
+     ranura por mes. Con 13 la ranura da 18,5 pt y con 10 sube a 24, un 30% más de
+     aire para los rótulos. Es la salida cuando un indicador con barras agrupadas
+     Y línea encima satura el panel aunque las etiquetas ya estén en 6 pt.
+     La ventana sigue anclada al CORTE: se recortan los meses más VIEJOS. */
+  const men = recortar(ind.mensual, corte, ind.mesesPanel || 13, "mensual");
+  const hayGrafica = (sem?.series?.length || men?.series?.length);
+
+  const hayCohorte = ind.cohorteSemanal || ind.cohorteMensual;
+
+  let datos;
+  if (ind.tabla) {
+    datos = tabla(ind.tabla);
+  } else if (hayCohorte) {
+    // Las dos cohortes van una al lado de la otra, en la misma reja que usan las
+    // dos gráficas: a la izquierda la semanal, a la derecha la mensual.
+    const una = !ind.cohorteSemanal || !ind.cohorteMensual;
+    datos = `<div class="graficas ${una ? "una" : ""}">
+      ${ind.cohorteSemanal ? `<div class="grafica">${tabla(ind.cohorteSemanal)}</div>` : ""}
+      ${ind.cohorteMensual ? `<div class="grafica">${tabla(ind.cohorteMensual)}</div>` : ""}</div>`;
+  } else if (hayGrafica) {
+    const una = !(sem?.series?.length) || !(men?.series?.length);
+    datos = `<div class="graficas ${una ? "una" : ""}">
+      ${grafica(sem, etqSemana, una)}${grafica(men, etqMes, una)}</div>`;
+  } else {
+    datos = `<p class="sin-datos">Sin datos para el corte seleccionado.</p>`;
+  }
+
+  const comentario = ind.comentario ? `<p class="comentario">${ind.comentario}</p>` : "";
+
+  return `<section class="indicador">
+    <div class="franja">
+      <h3>${ind.nombre}${ind.nota ? `<span class="nota">${ind.nota}</span>` : ""}</h3>
+      ${leyendaHtml(ind)}${selloHtml(ind.sello)}
+    </div>
+    <div class="reja reja-datos">
+      <div>
+        ${ind.kpis?.length ? `<div class="kpis">${ind.kpis.map(k => kpiHtml(k, ind.menosEsMejor)).join("")}</div>` : ""}
+        ${datos}
+        ${comentario}
+      </div>
+    </div>
+  </section>`;
+}
+
+/* Recorta la gráfica al corte y a las últimas N categorías. */
+function recortar(g, corte, n, granularidad) {
+  if (!g || !g.categorias) return g;
+  const mesCorte = corte.slice(0, 7);
+  const dentro = g.categorias.map(c => {
+    const iso = c.iso || c[2];                     // fecha ISO opcional
+    if (!iso) return true;
+    return granularidad === "semanal" ? iso <= corte : iso.slice(0, 7) <= mesCorte;
+  });
+  const idx = dentro.map((ok, i) => ok ? i : -1).filter(i => i >= 0).slice(-n);
+  if (idx.length === g.categorias.length) return g;
+  return {
+    ...g,
+    categorias: idx.map(i => g.categorias[i]),
+    series: g.series.map(s => ({ ...s, valores: idx.map(i => s.valores[i]) })),
+  };
+}
+</script>

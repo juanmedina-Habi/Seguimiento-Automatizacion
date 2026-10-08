@@ -1,0 +1,125 @@
+<script>
+/* Respaldo si la página se abre sin BigQuery. No son los números del tablero. */
+/* ===========================================================================
+   DATOS DE DEMOSTRACIÓN
+   Reproducen indicadores del WBR de Brokers Colombia porque son los que
+   ejercitan todo: ocho KPIs, series de línea, barras con línea y doble eje,
+   sello, comentario y el recuadro de comentario vacío.
+   Bórralos cuando tu datos.js esté listo.
+   ========================================================================= */
+
+const SEM_B = [["1 jun","2026","2026-06-01"],["8 jun","2026","2026-06-08"],
+               ["15 jun","2026","2026-06-15"],["22 jun","2026","2026-06-22"],
+               ["29 jun","2026","2026-06-29"],["6 jul","2026","2026-07-06"],
+               ["13 jul","2026","2026-07-13"],["20 jul","2026","2026-07-20"]];
+const MES_B = [["jul","2025","2025-07-01"],["ago","2025","2025-08-01"],["sept","2025","2025-09-01"],
+               ["oct","2025","2025-10-01"],["nov","2025","2025-11-01"],["dic","2025","2025-12-01"],
+               ["ene","2026","2026-01-01"],["feb","2026","2026-02-01"],["mar","2026","2026-03-01"],
+               ["abr","2026","2026-04-01"],["may","2026","2026-05-01"],["jun","2026","2026-06-01"],
+               ["jul","2026","2026-07-01"]];
+
+const DEMO = {
+  area: "Brokers",
+  pais: "Colombia",
+  corte: "2026-07-28",
+  secciones: [
+    {
+      banda: "Resultados", nivel: 1,
+      indicadores: [
+        {
+          nombre: "Ventas Market Maker",
+          sello: { estado: "validado" },
+          kpis: [
+            { valor: 16.67, etiqueta: "WoW", formato: "variacion" },
+            { valor: 213, etiqueta: "MTD mes actual" },
+            { valor: 213, etiqueta: "MTD mes anterior" },
+            { valor: 0.47, etiqueta: "MoM", formato: "variacion" },
+            { valor: 264, etiqueta: "Meta", tono: "meta" },
+            { valor: 81.06, etiqueta: "Cumplimiento Meta", formato: "porcentaje", tono: "aviso" },
+            { valor: 221, etiqueta: "Meta Estacional", tono: "meta" },
+            { valor: 96.65, etiqueta: "Cumpl. Meta Estacional", formato: "porcentaje", tono: "pos" },
+          ],
+          semanal: { categorias: SEM_B, formato: "entero", series: [
+            { nombre: "Ventas Market Maker", color: "var(--serie-linea)", tipo: "linea",
+              valores: [54, 54, 54, 48, 51, 57, 50, 56] }]},
+          mensual: { categorias: MES_B, formato: "entero", series: [
+            { nombre: "Ventas Market Maker", color: "var(--serie-linea)", tipo: "linea",
+              valores: [312, 249, 255, 255, 238, 200, 264, 233, 230, 265, 272, 221, 222] }]},
+          comentario: "Estamos proyectando cerrar el mes con 253 cierres, lo que nos dejaría en el 100% de cumplimiento de la meta.",
+        },
+        {
+          nombre: "Visitas",
+          kpis: [
+            { valor: -4.82, etiqueta: "WoW", formato: "variacion" },
+            { valor: 12620, etiqueta: "MTD mes actual", formato: "miles" },
+            { valor: 11535, etiqueta: "MTD mes anterior", formato: "miles" },
+            { valor: 9.41, etiqueta: "MoM", formato: "variacion" },
+            { valor: 14319, etiqueta: "Meta", formato: "miles", tono: "meta" },
+            { valor: 88.13, etiqueta: "Cumplimiento Meta", formato: "porcentaje", tono: "aviso" },
+            { valor: 12009, etiqueta: "Meta Estacional", formato: "miles", tono: "meta" },
+            { valor: 105.08, etiqueta: "Cumpl. Meta Estacional", formato: "porcentaje", tono: "pos" },
+          ],
+          semanal: { categorias: SEM_B, formato: "miles", etiquetas: false, series: [
+            { nombre: "Visitas Inmobiliaria", color: "var(--serie-linea)", tipo: "linea",
+              valores: [1797, 1772, 1662, 1834, 1904, 1843, 1690, 1861] },
+            { nombre: "Visitas iBuyer", color: "var(--serie-3)", tipo: "linea",
+              valores: [1168, 1161, 1459, 966, 1099, 1084, 1337, 1382] }]},
+          mensual: { categorias: MES_B, formato: "miles", etiquetas: false, series: [
+            { nombre: "Visitas Inmobiliaria", color: "var(--serie-linea)", tipo: "linea",
+              valores: [4896, 6861, 6788, 7206, 6647, 7496, 7521, 7608, 7615, 6334, 6283, 7722, 5967] },
+            { nombre: "Visitas iBuyer", color: "var(--serie-3)", tipo: "linea",
+              valores: [3036, 3106, 2773, 2703, 2608, 2432, 2377, 2366, 4516, 1711, 1943, 4246, 4246] }]},
+          comentario: "La caída semanal viene de iBuyer; Inmobiliaria se mantiene sobre 1.800 visitas.",
+        },
+      ],
+    },
+    {
+      banda: "Brokers", nivel: 2,
+      indicadores: [
+        {
+          nombre: "Costo Comisión Venta",
+          kpis: [
+            { valor: 4.33, etiqueta: "WoW", formato: "variacion" },
+            { valor: 2.57, etiqueta: "MTD mes actual", formato: "porcentaje" },
+            { valor: 2.59, etiqueta: "MTD mes anterior", formato: "porcentaje" },
+            { valor: -0.13, etiqueta: "MoM", formato: "variacion" },
+          ],
+          semanal: { categorias: SEM_B, formato: "porcentaje", series: [
+            { nombre: "Costo Comisión", color: "var(--serie-linea)", tipo: "linea",
+              valores: [2.55, 2.55, 2.56, 2.44, 2.64, 2.67, 2.66, 2.49] }]},
+          mensual: { categorias: MES_B, formato: "porcentaje", etiquetas: false, series: [
+            { nombre: "Costo Comisión", color: "var(--serie-linea)", tipo: "linea",
+              valores: [2.70, 2.68, 2.67, 2.70, 2.71, 2.58, 2.58, 2.73, 2.79, 2.60, 2.76, 2.76, 2.74] }]},
+          // Sin comentario a propósito: así se ve el recuadro vacío.
+        },
+        {
+          nombre: "Rotación Inventario",
+          nota: "*Barras apiladas con la rotación en días sobre el eje derecho.",
+          sello: { estado: "alerta", valor: "60%" },
+          kpis: [
+            { valor: -8, etiqueta: "WoW", formato: "variacion" },
+            { valor: 45, etiqueta: "MTD mes actual" },
+            { valor: 64, etiqueta: "MTD mes anterior" },
+            { valor: -30, etiqueta: "MoM", formato: "variacion" },
+            { valor: 75, etiqueta: "Meta", tono: "meta" },
+            { valor: 60, etiqueta: "Cumplimiento Meta", formato: "porcentaje", tono: "neg" },
+          ],
+          semanal: { categorias: SEM_B, formato: "entero", etiquetas: false, series: [
+            { nombre: "Backlog simple", color: "var(--serie-4)", valores: [39, 51, 40, 36, 37, 29, 25, 24] },
+            { nombre: "En espera de pago", color: "var(--serie-5)", valores: [11, 1, 6, 10, 7, 7, 5, 4] },
+            { nombre: "Nuevas promesas", color: "var(--serie-3)", valores: [14, 19, 18, 18, 18, 17, 18, 28] },
+            { nombre: "Rotación (días)", color: "var(--serie-negra)", tipo: "linea",
+              valores: [34, 24, 24, 21, 19, 17, 16, 15] }]},
+          mensual: { categorias: MES_B, formato: "entero", etiquetas: false, series: [
+            { nombre: "Backlog simple", color: "var(--serie-4)", valores: [38, 51, 41, 37, 49, 47, 51, 53, 38, 47, 50, 39, 45] },
+            { nombre: "En espera de pago", color: "var(--serie-5)", valores: [13, 10, 8, 6, 9, 9, 11, 8, 7, 8, 9, 5, 6] },
+            { nombre: "Nuevas promesas", color: "var(--serie-3)", valores: [67, 55, 61, 86, 79, 71, 61, 66, 85, 77, 85, 74, 70] },
+            { nombre: "Rotación (días)", color: "var(--serie-negra)", tipo: "linea",
+              valores: [49, 57, 58, 59, 59, 61, 70, 92, 72, 76, 76, 70, 68] }]},
+          comentario: "<b>Contexto:</b> acumulamos 44 firmas. Con 19 promesas pendientes de visto bueno del cliente estimamos cerrar entre 65 y 70.",
+        },
+      ],
+    },
+  ],
+};
+</script>
