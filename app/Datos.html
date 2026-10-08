@@ -43,6 +43,12 @@ const KPIS_POR_OMISION = ["wow", "mtd_actual", "mtd_anterior", "mom"];
 
 function etiqueta(iso, periodicidad) {
   const [a, m, d] = iso.split("-");
+  const grano = (typeof estadoFiltro !== "undefined" && estadoFiltro.grano) || "mes";
+  if (grano === "trimestre") {
+    const t = Math.floor((Number(m) - 1) / 3) + 1;
+    return [`${a} T${t}`, "", iso];
+  }
+  if (grano === "anio") return [a, "", iso];
   return periodicidad === "semanal"
     ? [`${+d} ${MES[+m - 1]}`, a, iso]     // 27 jul / 2026
     : [MES[+m - 1], a, iso];               // jul / 2026
