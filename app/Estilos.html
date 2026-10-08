@@ -550,6 +550,10 @@ svg.capa { position: absolute; inset: 0; width: 100%; height: 100%; overflow: vi
   transform: translate(-50%, 50%);
 }
 .eje-x { display: flex; gap: 3pt; margin-top: 4.5pt; }
+.grafica-semana .barras,
+.grafica-semana .eje-x { gap: 1pt; }
+.grafica-semana .etiqueta { overflow: visible; }
+.grafica-semana .etiqueta span { white-space: nowrap; }
 .etiqueta {
   flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center;
   font-size: 6.5pt; color: var(--tinta-suave); line-height: 1.3; text-align: center;
