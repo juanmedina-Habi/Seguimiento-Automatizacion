@@ -7,6 +7,7 @@
 const ETIQUETA_FILTRO = { Mexico: "México", Comite: "Comité" };
 const estadoFiltro = {
   tipo: "General",
+  grano: "mes",
   pais: null,
   fase: new Set(),
   area: new Set(),
@@ -64,7 +65,7 @@ function filasAgregadas() {
   const auto = new Map(), manual = new Map(), si = new Map(), no = new Map();
   for (const f of c.filas) {
     if (!pasaFiltro(f)) continue;
-    const mes = c.meses[f[0]];
+    const mes = (c.periodos || c.meses)[f[0]];
     const n = f[9];
     if (f[6] === iAuto) auto.set(mes, (auto.get(mes) || 0) + n);
     else if (f[6] === iManual) manual.set(mes, (manual.get(mes) || 0) + n);
@@ -112,6 +113,14 @@ function detalleFiltro() {
   return partes.length ? partes.join(" · ") : "";
 }
 
+function notasDeGrano() {
+  const palabra = { mes: "mes", trimestre: "trimestre", anio: "año" }[estadoFiltro.grano || "mes"];
+  for (const s of REPORTE.secciones || []) {
+    for (const ind of s.indicadores || []) {
+      if (ind.nota) ind.nota = ind.nota.replace(/\b(mes|trimestre|año)\b/, palabra);
+    }
+  }
+}
 function aplicarFiltro(excepto) {
   podarFiltro(excepto);
   estadoDetalle.automatizacion.pagina = 0;
@@ -119,6 +128,7 @@ function aplicarFiltro(excepto) {
   if (!(window.CELDAS && window.CELDAS.filas)) return;
   REPORTE = armar(filasAgregadas(), CONFIG, window.CORTE_WBR);
   REPORTE.pais = resumenFiltro();
+  notasDeGrano();
   const input = document.getElementById("corte");
   if (input) input.value = REPORTE.corte;
   render();
@@ -132,6 +142,11 @@ function actualizarFiltros() {
   const pais = document.getElementById("f-pais");
   if (!tipo || !pais) return;
   tipo.value = estadoFiltro.tipo;
+  document.querySelectorAll("#f-tiempo button").forEach(el => {
+    const on = el.dataset.grano === (estadoFiltro.grano || "mes");
+    el.classList.toggle("activa", on);
+    el.setAttribute("aria-pressed", on ? "true" : "false");
+  });
   pais.value = estadoFiltro.pais == null ? "" : String(estadoFiltro.pais);
   document.querySelectorAll("#f-fases button").forEach(el => {
     const on = estadoFiltro.fase.has(+el.dataset.i);
@@ -211,6 +226,14 @@ function iniciarFiltros() {
         <h2>Filtros del reporte</h2>
         <p>El recorte se aplica al momento, en las gráficas y en la tabla.</p>
       </div>
+      <div class="tiempo">
+        <span>Tiempo</span>
+        <div class="fase-pills" id="f-tiempo">
+          <button type="button" data-grano="mes" class="activa" aria-pressed="true">Mes</button>
+          <button type="button" data-grano="trimestre" aria-pressed="false">Trimestre</button>
+          <button type="button" data-grano="anio" aria-pressed="false">Año</button>
+        </div>
+      </div>
       <button type="button" class="btn-limpiar" id="f-limpiar">Limpiar</button>
     </div>
     <div class="filtros-rejilla">
@@ -230,7 +253,7 @@ function iniciarFiltros() {
       <div id="f-zm"></div>
     </div>
     <p class="filtros-nota" id="f-nota" hidden>Capacity deja fuera la fase Inicial cuando el inmueble no fue priceado.</p>
-    <p class="filtros-ayuda">Pasa el cursor sobre un mes para ver el detalle. Sin fase marcada entran Inicial y Comité.</p>`;
+    <p class="filtros-ayuda">Mes, trimestre y año cambian el eje de las dos gráficas. La tabla sigue siendo nid por nid. Sin fase marcada entran Inicial y Comité.</p>`;
   const selPais = document.getElementById("f-pais");
   selPais.innerHTML = `<option value="">Todos</option>`
     + c.pais.map((p, i) => `<option value="${i}">${escapeFiltro(rotuloFiltro(p))}</option>`).join("");
@@ -248,6 +271,13 @@ function iniciarFiltros() {
   widgetFiltro(document.getElementById("f-area"), "Área metropolitana", c.area, estadoFiltro.area, "area");
   widgetFiltro(document.getElementById("f-zg"), "Zona grande", c.zg, estadoFiltro.zg, "zg");
   widgetFiltro(document.getElementById("f-zm"), "Zona mediana", c.zm, estadoFiltro.zm, "zm");
+  document.getElementById("f-tiempo").addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b || b.dataset.grano === estadoFiltro.grano) return;
+    estadoFiltro.grano = b.dataset.grano;
+    if (window.DETALLE && window.CELDAS) reconstruirCeldas();
+    aplicarFiltro("tiempo");
+  });
   document.getElementById("f-tipo").addEventListener("change", e => {
     estadoFiltro.tipo = e.target.value;
     aplicarFiltro("tipo");
@@ -265,12 +295,14 @@ function iniciarFiltros() {
   });
   document.getElementById("f-limpiar").addEventListener("click", () => {
     estadoFiltro.tipo = "General";
+    estadoFiltro.grano = "mes";
     estadoFiltro.pais = null;
     estadoFiltro.fase.clear();
     estadoFiltro.area.clear();
     estadoFiltro.zg.clear();
     estadoFiltro.zm.clear();
     document.querySelectorAll(".filtro-panel input").forEach(el => { el.value = ""; });
+    if (window.DETALLE && window.CELDAS) reconstruirCeldas();
     aplicarFiltro();
   });
   document.addEventListener("click", e => {
