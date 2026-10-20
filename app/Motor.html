@@ -765,7 +765,9 @@ function grafica(g, etiquetador, unaSola) {
         valor: se.valores[i],
       })),
     };
-    return `<button type="button" class="mes-hit" data-punto="${escapeFiltro(JSON.stringify(punto))}" aria-label="${escapeFiltro(punto.mes)}"></button>`;
+    const iso = cat[2] || "";
+    const elegida = iso && typeof periodoDetalle === "function" && periodoDetalle() === iso ? " elegida" : "";
+    return `<button type="button" class="mes-hit${elegida}" data-iso="${escapeFiltro(iso)}" data-punto="${escapeFiltro(JSON.stringify(punto))}" aria-label="${escapeFiltro(punto.mes)}"></button>`;
   }).join("");
   return `<div class="grafica${semanaEje ? " grafica-semana" : ""}">
     <div class="plot" style="height:${alto}pt;margin-top:${aire}pt;padding-left:${padIzq}pt;padding-right:${padDer}pt">
@@ -885,6 +887,7 @@ function kpiHtml(k, menosEsMejor) {
     <b>${fmt(k.valor, formato)}</b><span>${k.etiqueta}</span></div>`;
 }
 
+const PERIODOS_POR_GRANO = { semana: 52, mes: 12, trimestre: 4, anio: 50 };
 function indicadorHtml(ind, corte) {
   const sem = recortar(ind.semanal, corte, 8, "semanal");
   /* Cuántos meses entran al panel. Trece por omisión —el año corrido más el mes
@@ -896,8 +899,10 @@ function indicadorHtml(ind, corte) {
      aire para los rótulos. Es la salida cuando un indicador con barras agrupadas
      Y línea encima satura el panel aunque las etiquetas ya estén en 6 pt.
      La ventana sigue anclada al CORTE: se recortan los meses más VIEJOS. */
-  const esSemana = typeof estadoFiltro !== "undefined" && estadoFiltro.grano === "semana";
-  const topePeriodos = esSemana ? 200 : (ind.mesesPanel || 13);
+  const grano = (typeof estadoFiltro !== "undefined" && estadoFiltro.grano) || "mes";
+  const esSemana = grano === "semana";
+  // En pantalla se muestra un año: 52 semanas, 12 meses o 4 trimestres. En año, todos.
+  const topePeriodos = PERIODOS_POR_GRANO[grano] || ind.mesesPanel || 13;
   const men = recortar(ind.mensual, corte, topePeriodos, "mensual");
   if (esSemana && men) men.etiquetas = false;
   const hayGrafica = (sem?.series?.length || men?.series?.length);
