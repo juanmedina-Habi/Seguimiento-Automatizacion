@@ -91,14 +91,15 @@ function refreshSnapshots() {
   var fallo = {};
   specs.forEach(function (spec) {
     try {
-      spec.ref = lanzarConsulta_(spec.sql);
+      spec.ref = lanzarConsulta_(sqlCompacto_(spec));
       pendientes.push(spec);
     } catch (e) {
       fallo[spec.nombre] = e.message;
     }
   });
   var inicio = Date.now();
-  while (pendientes.length && Date.now() - inicio < 15 * 60 * 1000) {
+  // Apps Script corta a los 6 minutos: si BigQuery no termina en 4, se registra el error.
+  while (pendientes.length && Date.now() - inicio < 4 * 60 * 1000) {
     var siguen = [];
     pendientes.forEach(function (spec) {
       try {
@@ -286,21 +287,59 @@ function jobListo_(ref) {
   return true;
 }
 
+// BigQuery arma el archivo por columnas: un diccionario y los índices de cada texto, los días
+// de cada fecha y los números, en el formato que lee Archivo.html. Así Apps Script recibe unas
+// pocas filas en lugar de medio millón y la lectura cabe holgada en los 6 minutos.
+function sqlCompacto_(spec) {
+  var partes = [];
+  var dicts = [];
+  spec.string.forEach(function (c, n) {
+    dicts.push('d' + n + ' AS (SELECT v, ROW_NUMBER() OVER (ORDER BY v) - 1 AS k FROM (SELECT DISTINCT ' + c + ' AS v FROM t WHERE ' + c + ' IS NOT NULL AND ' + c + ' != ""))');
+    partes.push('SELECT "' + c + '" AS col, (SELECT TO_JSON_STRING(ARRAY_AGG(v ORDER BY k)) FROM d' + n + ') AS d, '
+      + '(SELECT STRING_AGG(CAST(IFNULL(d' + n + '.k, -1) AS STRING), "," ORDER BY t.rn) FROM t LEFT JOIN d' + n + ' ON d' + n + '.v = t.' + c + ') AS i');
+  });
+  spec.fecha.forEach(function (c) {
+    partes.push('SELECT "' + c + '", NULL, STRING_AGG(IFNULL(CAST(UNIX_DATE(SAFE.PARSE_DATE("%F", ' + c + ')) AS STRING), ""), "," ORDER BY rn) FROM t');
+  });
+  spec.numero.forEach(function (c) {
+    partes.push('SELECT "' + c + '", NULL, STRING_AGG(IFNULL(CAST(' + c + ' AS STRING), ""), "," ORDER BY rn) FROM t');
+  });
+  partes.push('SELECT "__rows", NULL, CAST(COUNT(*) AS STRING) FROM t');
+  return 'WITH base AS (\n' + spec.sql + '\n),\n'
+    // El orden por el contenido completo de la fila es estable: todas las columnas salen alineadas.
+    + 't AS (SELECT b.*, ROW_NUMBER() OVER (ORDER BY TO_JSON_STRING(b)) AS rn FROM base b),\n'
+    + dicts.join(',\n') + '\n'
+    + partes.join('\nUNION ALL\n');
+}
+
+function jsonCompacto_(ref) {
+  var cols = {};
+  cadaFila_(ref, function (fila) { cols[fila.col] = fila; }, 2);
+  var n = Number((cols.__rows || {}).i || 0);
+  var trozos = ['"__rows":' + n];
+  Object.keys(cols).forEach(function (c) {
+    if (c === '__rows') return;
+    var fila = cols[c];
+    var i = JSON.stringify(fila.i || '');
+    trozos.push(JSON.stringify(c) + ':' + (fila.d == null ? i : '{"d":' + (fila.d || '[]') + ',"i":' + i + '}'));
+  });
+  return { n: n, json: '{' + trozos.join(',') + '}' };
+}
+
 function guardarTabla_(spec) {
-  var encoder = new Encoder_(spec);
-  cadaFila_(spec.ref, function (fila) { encoder.push(fila); });
-  var json = encoder.json();
+  var compacto = jsonCompacto_(spec.ref);
+  var json = compacto.json;
   var bytes = Utilities.gzip(Utilities.newBlob(json, 'application/json', spec.nombre + '.json')).getBytes();
   if (bytes.length > TOPE_GZIP) throw new Error('El archivo pesa más de 20 MB. Hay que partir la tabla.');
   var archivo = asegurarCarpeta_().createFile(Utilities.newBlob(bytes, 'application/gzip', spec.nombre + '.json.gz'));
-  return { filas: encoder.n, bytes: bytes.length, fileId: archivo.getId(), error: '' };
+  return { filas: compacto.n, bytes: bytes.length, fileId: archivo.getId(), error: '' };
 }
 
-function cadaFila_(ref, fn) {
+function cadaFila_(ref, fn, porPagina) {
   var token = null;
   var campos = null;
   while (true) {
-    var opts = { maxResults: 20000, location: ref.location };
+    var opts = { maxResults: porPagina || 20000, location: ref.location };
     if (token) opts.pageToken = token;
     var respuesta = BigQuery.Jobs.getQueryResults(ref.projectId, ref.jobId, opts);
     if (!respuesta.jobComplete) throw new Error('Resultado incompleto');
@@ -317,69 +356,6 @@ function cadaFila_(ref, fn) {
     token = respuesta.pageToken;
     if (!token) break;
   }
-}
-
-function Encoder_(spec) {
-  this.n = 0;
-  this.string = {};
-  this.fecha = {};
-  this.numero = {};
-  var self = this;
-  spec.string.forEach(function (c) { self.string[c] = { map: {}, dict: [], idx: [] }; });
-  spec.fecha.forEach(function (c) { self.fecha[c] = []; });
-  spec.numero.forEach(function (c) { self.numero[c] = []; });
-}
-
-Encoder_.prototype.push = function (row) {
-  var self = this;
-  Object.keys(this.string).forEach(function (c) {
-    var bag = self.string[c];
-    var v = row[c];
-    if (v == null || v === '') { bag.idx.push(-1); return; }
-    v = String(v);
-    var id = bag.map[v];
-    if (id == null) {
-      id = bag.dict.length;
-      bag.map[v] = id;
-      bag.dict.push(v);
-    }
-    bag.idx.push(id);
-  });
-  Object.keys(this.fecha).forEach(function (c) {
-    self.fecha[c].push(diaUnix_(row[c]));
-  });
-  Object.keys(this.numero).forEach(function (c) {
-    var v = row[c];
-    self.numero[c].push(v == null || v === '' ? '' : String(v));
-  });
-  this.n++;
-};
-
-Encoder_.prototype.json = function () {
-  var out = { __rows: this.n };
-  var self = this;
-  Object.keys(this.string).forEach(function (c) {
-    var bag = self.string[c];
-    out[c] = { d: bag.dict, i: bag.idx.join(',') };
-    bag.idx = null;
-    bag.map = null;
-  });
-  Object.keys(this.fecha).forEach(function (c) {
-    out[c] = self.fecha[c].join(',');
-    self.fecha[c] = null;
-  });
-  Object.keys(this.numero).forEach(function (c) {
-    out[c] = self.numero[c].join(',');
-    self.numero[c] = null;
-  });
-  return JSON.stringify(out);
-};
-
-function diaUnix_(iso) {
-  if (!iso) return '';
-  var p = String(iso).split('-');
-  if (p.length < 3) return '';
-  return String(Math.round(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])) / 86400000));
 }
 
 function asegurarCarpeta_() {
