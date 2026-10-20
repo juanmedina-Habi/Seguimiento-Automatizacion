@@ -138,6 +138,31 @@ function escalaTope(tope, piso = 0) {
   return { tope, piso, ticks };
 }
 
+/* Eje de una línea sola que arranca cerca de su mínimo y no en cero
+   (`pisoAjustado`). Un porcentaje que vive entre 94 y 100 se dibuja aplastado
+   contra el techo si el eje va de 0 a 100; así se ve cómo se mueve. */
+function escalaRango(minimo, maximo, techo) {
+  const rango = Math.max(maximo - minimo, Math.abs(maximo) * .02, 1e-6);
+  const lo = Math.max(0, minimo - rango * .5);
+  // Un porcentaje no pasa de 100: el eje tampoco.
+  const hi = techo != null && maximo <= techo ? Math.min(techo, maximo + rango * .25) : maximo + rango * .25;
+  let mejor = null;
+  for (const mag of [1e-3, 1e-2, .1, 1, 10, 100, 1e3, 1e4, 1e5, 1e6]) {
+    for (const f of [1, 2, 2.5, 5]) {
+      const paso = f * mag;
+      const piso = Math.floor(lo / paso) * paso;
+      const tope = Math.ceil(hi / paso) * paso;
+      const n = Math.round((tope - piso) / paso);
+      if (n < 4 || n > 6) continue;
+      if (!mejor || (tope - piso) < (mejor.tope - mejor.piso)) mejor = { paso, tope, piso };
+    }
+  }
+  if (!mejor) return escala(maximo, 0);
+  const ticks = [];
+  for (let t = mejor.piso; t <= mejor.tope + 1e-9; t += mejor.paso) ticks.push(+t.toFixed(6));
+  return { tope: mejor.tope, piso: mejor.piso, ticks };
+}
+
 /* ------------------------------------------------------------- gráfica */
 function grafica(g, etiquetador, unaSola) {
   if (!g || !g.series || !g.series.length) return "";
@@ -219,7 +244,9 @@ function grafica(g, etiquetador, unaSola) {
                    : barras.length
                      ? escala(Math.max(0, ...totales, compartido ? maxLinea : 0),
                               compartido ? minLinea : 0)
-                     : escala(maxLinea, minLinea);
+                     : (g.pisoAjustado && valsLinea.length
+                         ? escalaRango(Math.min(...valsLinea), maxLinea, lineas.every(se => fmtSerie(se) === "porcentaje") ? 100 : null)
+                         : escala(maxLinea, minLinea));
   let der = (!compartido && barras.length && lineas.length) ? escala(maxLinea, minLinea) : null;
   /* Tope fijo del eje derecho, declarado por el área. Se ignora si la línea se
      sale de él: un eje que corta la serie miente, y prefiero el eje automático
@@ -335,7 +362,7 @@ function grafica(g, etiquetador, unaSola) {
     .map(t => `<span class="tick" style="bottom:${pct(esc, t)}%">${fmt(t, fmtEje)}</span>`)
     .join("");
   const guiasHtml = g.guias ? `<div class="guias" aria-hidden="true">${
-    izq.ticks.filter(t => t > 0).map(t =>
+    izq.ticks.filter(t => t > izq.piso).map(t =>
       `<span style="bottom:${pct(izq, t)}%"></span>`).join("")}</div>` : "";
 
   // Camino de GRUPOS APILADOS. Va aparte del apilado simple y del agrupado, que
@@ -499,6 +526,7 @@ function grafica(g, etiquetador, unaSola) {
       const TOPE_EMPUJE = 26;   // más allá de esto la etiqueta miente sobre su punto
       const ladoDefecto = conGrupos ? -1 : +1;
       const ladoDe = (vals, i) => {
+        if (g.rotulosArriba) return +1;
         let a = null, b = null;
         for (let k = i - 1; k >= 0; k--) if (vals[k] != null) { a = vals[k]; break; }
         for (let k = i + 1; k < vals.length; k++) if (vals[k] != null) { b = vals[k]; break; }
