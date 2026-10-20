@@ -292,6 +292,9 @@ body {
    El zoom escala todo junto, así que el acomodo de rótulos sigue igual. El PDF no cambia. */
 @media screen {
   .graficas { zoom: 1.45; }
+  /* Sin línea encima, el número de cada banda va centrado y no en el carril izquierdo. */
+  .seg .pct.banda { justify-content: center; padding-left: 0; font-weight: 600; }
+  .etq.total { font-weight: 600; }
   .franja h3 { font-size: 16px; }
   .franja .nota { font-size: 12px; }
   .leyenda { font-size: 13px; }

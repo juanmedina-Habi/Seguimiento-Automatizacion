@@ -157,6 +157,8 @@ function armar(filas, config, corte) {
       rotulosTotal: porPanel(cfg.rotulosTotal, periodicidad),
       topeEjeDerecho: porPanel(cfg.topeEjeDerecho, periodicidad),
       guias: porPanel(cfg.guias, periodicidad),
+      pisoAjustado: cfg.pisoAjustado,
+      rotulosArriba: cfg.rotulosArriba,
       series: nombres.map((n, i) => {
         const sc = (cfg.series || {})[n] || {};
         const mapa = new Map(per[n].map(f => [f.fecha, f.valor]));
