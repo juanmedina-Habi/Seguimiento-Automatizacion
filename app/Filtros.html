@@ -1,5 +1,11 @@
 <script>
 /* Tipo, país, fase, área y zonas. */
+// Muestra «Ver hasta» como año-mes-día, el valor tal cual del campo.
+function textoCorte() {
+  const input = document.getElementById("corte");
+  const texto = document.getElementById("corte-texto");
+  if (input && texto) texto.textContent = input.value || "";
+}
 /* --------------------------------------------------------- filtros de pantalla
    datos.js trae el grano (mes × país × fase × zona × método × polynator), no
    las cuatro series ya sumadas. Cada cambio de filtro recuenta y vuelve a
@@ -131,6 +137,7 @@ function aplicarFiltro(excepto) {
   notasDeGrano();
   const input = document.getElementById("corte");
   if (input) input.value = REPORTE.corte;
+  textoCorte();
   render();
   actualizarFiltros();
 }
@@ -239,7 +246,7 @@ function iniciarFiltros() {
     </div>
     <div class="filtros-rejilla">
       <label class="filtro-fijo"><span>Ver hasta</span>
-        <input type="date" id="corte">
+        <span class="fecha-iso"><input type="date" id="corte"><span class="fecha-iso-texto" id="corte-texto" aria-hidden="true"></span></span>
       </label>
       <label class="filtro-fijo"><span>País</span><select id="f-pais"></select></label>
       <label class="filtro-fijo"><span>Tipo</span>
@@ -262,8 +269,11 @@ function iniciarFiltros() {
     `<button type="button" data-i="${i}" aria-pressed="false">${escapeFiltro(rotuloFiltro(nombre))}</button>`).join("");
   const inputCorte = document.getElementById("corte");
   inputCorte.value = REPORTE.corte;
+  textoCorte();
+  inputCorte.addEventListener("input", textoCorte);
+  inputCorte.addEventListener("click", () => { try { inputCorte.showPicker(); } catch (e) {} });
   inputCorte.addEventListener("change", e => {
-    if (!e.target.value) { e.target.value = REPORTE.corte; return; }
+    if (!e.target.value) { e.target.value = REPORTE.corte; textoCorte(); return; }
     window.CORTE_WBR = e.target.value;
     REPORTE.corte = e.target.value;
     if (window.DETALLE && window.CELDAS) reconstruirCeldas();
@@ -276,6 +286,7 @@ function iniciarFiltros() {
     const b = e.target.closest("button");
     if (!b || b.dataset.grano === estadoFiltro.grano) return;
     estadoFiltro.grano = b.dataset.grano;
+    soltarPeriodos();
     if (window.DETALLE && window.CELDAS) reconstruirCeldas();
     aplicarFiltro("tiempo");
   });
@@ -297,6 +308,7 @@ function iniciarFiltros() {
   document.getElementById("f-limpiar").addEventListener("click", () => {
     estadoFiltro.tipo = "General";
     estadoFiltro.grano = "mes";
+    soltarPeriodos();
     estadoFiltro.pais = null;
     estadoFiltro.fase.clear();
     estadoFiltro.area.clear();

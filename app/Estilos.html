@@ -287,6 +287,24 @@ body {
   background: transparent; cursor: pointer; font: inherit;
 }
 .mes-hit:hover, .mes-hit:focus-visible { background: rgba(126, 34, 206, .08); outline: none; }
+.mes-hit.elegida { background: rgba(126, 34, 206, .14); box-shadow: inset 0 -3px 0 #7E22CE; }
+/* En pantalla las gráficas se agrandan para leerse al tamaño de la tabla de detalle.
+   El zoom escala todo junto, así que el acomodo de rótulos sigue igual. El PDF no cambia. */
+@media screen {
+  .graficas { zoom: 1.45; }
+  .franja h3 { font-size: 16px; }
+  .franja .nota { font-size: 12px; }
+  .leyenda { font-size: 13px; }
+}
+/* «Ver hasta» se lee en año-mes-día. El campo de fecha del navegador sigue debajo
+   para el calendario, pero su texto se oculta y encima va la fecha en ISO. */
+.fecha-iso { position: relative; display: block; }
+.fecha-iso input::-webkit-datetime-edit { opacity: 0; }
+.fecha-iso-texto {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  pointer-events: none; font-size: 13px; color: var(--tinta); font-variant-numeric: tabular-nums;
+}
+.btn-periodo { margin-left: 6px; padding: 2px 8px; font-size: 12px; }
 .tarjeta-mes {
   position: fixed; z-index: 40; min-width: 196px; max-width: 260px;
   background: #fff; color: var(--tinta); border: 1px solid #e4e4e7; border-radius: 8px;

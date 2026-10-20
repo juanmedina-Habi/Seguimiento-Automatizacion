@@ -2,10 +2,32 @@
 /* Tabla de nid, búsqueda y descarga. */
 let estadoVista = "automatizacion";
 const estadoDetalle = {
-  automatizacion: { nid: "", pagina: 0 },
-  polynator: { nid: "", pagina: 0 },
+  automatizacion: { nid: "", pagina: 0, periodo: "" },
+  polynator: { nid: "", pagina: 0, periodo: "" },
 };
 function detalleActivo() { return estadoDetalle[estadoVista]; }
+// Periodo elegido con un clic en la gráfica: la clave del mes, semana, trimestre o año.
+function periodoDetalle() { return detalleActivo().periodo || ""; }
+function elegirPeriodo(iso) {
+  const det = detalleActivo();
+  det.periodo = det.periodo === iso ? "" : iso;
+  det.pagina = 0;
+  document.querySelectorAll("#pagina .mes-hit").forEach(b => b.classList.toggle("elegida", !!det.periodo && b.dataset.iso === det.periodo));
+  pintarDetalle();
+}
+// Al cambiar de grano la clave del periodo deja de existir; Limpiar también la suelta.
+function soltarPeriodos() {
+  Object.values(estadoDetalle).forEach(det => { det.periodo = ""; det.pagina = 0; });
+}
+function textoPeriodo(iso) {
+  const [a, m, d] = iso.split("-");
+  const grano = estadoFiltro.grano || "mes";
+  if (grano === "semana") return "la semana del " + iso;
+  if (grano === "trimestre") return "el trimestre " + (Math.floor((+m - 1) / 3) + 1) + " de " + a;
+  if (grano === "anio") return "el año " + a;
+  return (MES_LARGO[+m - 1] || m) + " de " + a;
+}
+function fechaIso(dia) { return dia || ""; }
 function enAppsScript() {
   return !!(window.google && google.script && google.script.run);
 }
@@ -49,6 +71,8 @@ function pasaDetalle(f) {
   if (e.area.size && !e.area.has(f[5])) return false;
   if (e.zg.size && !e.zg.has(f[6])) return false;
   if (e.zm.size && !e.zm.has(f[7])) return false;
+  const periodo = periodoDetalle();
+  if (periodo && window.DETALLE && clavePeriodo(window.DETALLE.dias[f[1]]) !== periodo) return false;
   return true;
 }
 function recolectarDetalle() {
@@ -75,7 +99,7 @@ function htmlTablaDetalle() {
     <div class="detalle-cab">
       <div>
         <h2>Tabla detalle</h2>
-        <p>${nota}</p>
+        <p>${nota} <span id="det-periodo"></span></p>
       </div>
       <button type="button" class="btn-descarga" id="det-descarga">Descargar CSV</button>
     </div>
@@ -153,10 +177,9 @@ function pintarDetalleLocal() {
   const c = window.CELDAS;
   const d = window.DETALLE;
   cuerpo.innerHTML = muestra.length ? muestra.map(f => {
-    const [y, m, dia] = d.dias[f[1]].split("-");
     const celdas = [
       f[0],
-      `${+dia}/${+m}/${y}`,
+      fechaIso(d.dias[f[1]]),
       d.ciudad[f[2]],
       c.zg[f[6]],
       c.area[f[5]],
@@ -168,6 +191,15 @@ function pintarDetalleLocal() {
   }).join("") : `<tr><td colspan="8">No hay nid con estos filtros.</td></tr>`;
   const desde = total ? detalleActivo().pagina * TAM_DETALLE + 1 : 0;
   const hasta = detalleActivo().pagina * TAM_DETALLE + muestra.length;
+  const aviso = document.getElementById("det-periodo");
+  if (aviso) {
+    const periodo = periodoDetalle();
+    aviso.innerHTML = periodo
+      ? `Solo ${escapeFiltro(textoPeriodo(periodo))}. <button type="button" class="btn-limpiar btn-periodo" id="det-todo">Ver todo el recorte</button>`
+      : "";
+    const todo = document.getElementById("det-todo");
+    if (todo) todo.addEventListener("click", () => elegirPeriodo(periodo));
+  }
   cuenta.textContent = total
     ? `${NF.entero.format(desde)}–${NF.entero.format(hasta)} de ${NF.entero.format(total)}`
     : "0 nid.";
@@ -197,9 +229,8 @@ function descargarDetalle() {
       window.alert("Hay más de " + NF.entero.format(TOPE_CSV_LOCAL) + " nid en este recorte. Acota país, fase o zona: la descarga llega hasta " + NF.entero.format(TOPE_CSV_LOCAL) + ".");
       return;
     }
-    const [y, m, dia] = d.dias[f[1]].split("-");
     lineas.push([
-      f[0], `${+dia}/${+m}/${y}`, d.ciudad[f[2]], c.zg[f[6]], c.area[f[5]],
+      f[0], fechaIso(d.dias[f[1]]), d.ciudad[f[2]], c.zg[f[6]], c.area[f[5]],
       rotuloFiltro(c.fase[f[4]]), c.poly[f[9]], c.way[f[8]],
     ].map(celdaCsv).join(";"));
   }

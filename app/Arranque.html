@@ -297,6 +297,10 @@ paginaEl.addEventListener("mouseout", e => {
   if (sig) return;
   ocultarTarjeta();
 });
+paginaEl.addEventListener("click", e => {
+  const hit = e.target.closest(".mes-hit");
+  if (hit && hit.dataset.iso) elegirPeriodo(hit.dataset.iso);
+});
 paginaEl.addEventListener("focusin", e => {
   const hit = e.target.closest(".mes-hit");
   if (hit) pintarTarjeta(hit, { clientX: hit.getBoundingClientRect().left, clientY: hit.getBoundingClientRect().bottom });
