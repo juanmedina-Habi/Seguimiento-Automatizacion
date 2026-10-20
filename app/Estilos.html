@@ -303,9 +303,12 @@ body {
    para el calendario, pero su texto se oculta y encima va la fecha en ISO. */
 .fecha-iso { position: relative; display: block; }
 .fecha-iso input::-webkit-datetime-edit { opacity: 0; }
-.fecha-iso-texto {
+/* Dentro de .filtro-fijo cualquier span toma el estilo de rótulo (chico, gris, en
+   mayúsculas); la fecha lleva el mismo texto que los demás campos. */
+.filtro-fijo .fecha-iso-texto {
   position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
-  pointer-events: none; font-size: 13px; color: var(--tinta); font-variant-numeric: tabular-nums;
+  pointer-events: none; font-size: 12px; color: #171717; letter-spacing: normal;
+  text-transform: none; font-variant-numeric: tabular-nums;
 }
 .btn-periodo { margin-left: 6px; padding: 2px 8px; font-size: 12px; }
 .tarjeta-mes {
